@@ -32,7 +32,7 @@ async def on_ready():
     print(f"{bot.user} is online and ready!")
 
 @bot.command()
-async def create_kit(ctx, prefix):
+async def create_kit(ctx, name, prefix):
     name = f"{prefix}kit"
 
     characters[ctx.author.id] = {
@@ -45,7 +45,7 @@ async def create_kit(ctx, prefix):
     await ctx.send(f"{name} has been born into the Clan! 🐾")
 
 @bot.command()
-async def age(ctx, *, name):
+async def age(ctx, name):
     first_name = name.strip().split()[0]
 
     if first_name not in kits:
