@@ -42,24 +42,31 @@ async def age(ctx, moons: int):
     await ctx.send(f"🌙 You are now {moons_now} moons old!")
 
 @bot.command()
-async def stats(ctx, *, name):
-    first_name = name.strip().split()[0]
-
-    if first_name not in kits:
-        await ctx.send("That kit does not exist.")
+async def stats(ctx):
+    if ctx.author.id not in characters:
+        await ctx.send("You don't have a character.")
         return
 
-    kit = kits[first_name]
+    char = characters[ctx.author.id]
+
+    name = char["prefix"]
+    rank = char["rank"]
+    moons = char["moons"]
+
+    if rank == "kit":
+        display = f"{name}kit"
+    elif rank == "apprentice":
+        display = f"{name}paw"
+    elif rank == "warrior":
+        display = f"{name}{char['suffix']}"
+    else:
+        display = name
 
     await ctx.send(
-        f"📜 Stats for {display_name(kit)}:\n"
-        f"Strength: {kit['strength']}\n"
-        f"Agility: {kit['agility']}\n"
-        f"Intelligence: {kit['intelligence']}\n"
-        f"Age: {kit['age']}\n"
-        f"Clan: {kit['clan']}"
+        f"📜 **{display}**\n"
+        f"Rank: {rank}\n"
+        f"Age: {moons} moons"
     )
-
 @bot.command()
 async def clan(ctx, *, args):
     parts = args.strip().split()
@@ -140,19 +147,5 @@ async def make_warrior(ctx, member: discord.Member):
 @bot.command()
 async def ping(ctx):
     await ctx.send("ClanTracker is active! 🐾")
-
-def display_name(kit):
-    """Return the full display name based on rank."""
-    first = kit["first_name"]
-    rank = kit["rank"]
-
-    if rank == "kit":
-        return f"{first}kit"
-    elif rank == "apprentice":
-        return f"{first}paw"
-    elif rank == "warrior":
-        second = kit.get("second_name", "")
-        return f"{first}{second}" if second else f"{first}"
-
 
 bot.run(TOKEN)
