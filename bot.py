@@ -42,6 +42,8 @@ async def create_kit(ctx, prefix):
         "suffix": None
     }
 
+    save_characters()
+
     await ctx.send(f"{name} has been born into the Clan! 🐾")
 
 @bot.command()
