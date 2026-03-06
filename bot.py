@@ -48,49 +48,42 @@ async def age(ctx, moons: int):
         await ctx.send(f"🌙 You are now {moons_now} moons old and have been promoted to **apprentice**! Your name is now {name} 🐾")
     else:
         await ctx.send(f"🌙 You are now {moons_now} moons old!")
+        
 @bot.command()
 async def stats(ctx):
+    # Make sure the player has a character
     if ctx.author.id not in characters:
-        await ctx.send("You don't have a character.")
+        await ctx.send("You don't have a character yet. Use !kit <name> first.")
         return
 
     char = characters[ctx.author.id]
 
-    name = char["prefix"]
-    rank = char["rank"]
-    moons = char["moons"]
-
-    if rank == "kit":
-        display = f"{name}kit"
-    elif rank == "apprentice":
-        display = f"{name}paw"
-    elif rank == "warrior":
-        display = f"{name}{char['suffix']}"
+    # Determine display name
+    if char["rank"] == "kit":
+        display = f"{char['prefix']}kit"
+    elif char["rank"] == "apprentice":
+        display = f"{char['prefix']}paw"
+    elif char["rank"] == "warrior":
+        display = f"{char['prefix']}{char['suffix']}"
     else:
-        display = name
+        display = char["prefix"]
 
     await ctx.send(
         f"📜 **{display}**\n"
-        f"Rank: {rank}\n"
-        f"Age: {moons} moons"
+        f"Rank: {char['rank']}\n"
+        f"Age: {char['moons']} moons"
     )
+    
 @bot.command()
-async def clan(ctx, *, args):
-    parts = args.strip().split()
-    if len(parts) < 2:
-        await ctx.send("Usage: !clan <kit_name> <clan_name>")
+async def clan(ctx, *, clan_name):
+    # Make sure the player has a character
+    if ctx.author.id not in characters:
+        await ctx.send("You don't have a character yet. Use !kit <name> first.")
         return
 
-    first_name = parts[0]
-    clan_name = " ".join(parts[1:])
-
-    if first_name not in kits:
-        await ctx.send("That kit does not exist.")
-        return
-
-    kits[first_name]["clan"] = clan_name
-    await ctx.send(f"{display_name(kits[first_name])} has joined {clan_name} Clan!")
-
+    char = characters[ctx.author.id]
+    char["clan"] = clan_name
+    await ctx.send(f"{char['prefix']} has joined **{clan_name} Clan**! 🐾")
 @bot.command()
 @commands.has_permissions(administrator=True)
 async def make_apprentice(ctx, member: discord.Member):
