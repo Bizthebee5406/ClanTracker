@@ -2,16 +2,17 @@ import discord
 from discord.ext import commands
 import os
 import random 
+import json
 
 TOKEN = os.environ["TOKEN"]
 
-# Intents (required for message content)
 intents = discord.Intents.default()
 intents.message_content = True
 
 bot = commands.Bot(command_prefix="!", intents=intents)
 
-kits = {}  # Stores all kits/apprentices/warriors
+kits = {}
+characters = {}
 
 def display_name(kit):
     """Return the full display name based on rank."""
@@ -26,33 +27,22 @@ def display_name(kit):
         second = kit.get("second_name", "")
         return f"{first}{second}" if second else f"{first}"
 
-
 @bot.event
 async def on_ready():
     print(f"{bot.user} is online and ready!")
 
 @bot.command()
-async def create_kit(ctx, *, name):
-    """Create a new kit with automatic 'kit' suffix."""
-    first_name = name.strip().split()[0]  # Take the first word as internal name
+async def create_kit(ctx, prefix):
+    name = f"{prefix}kit"
 
-    if first_name in kits:
-        await ctx.send(f"A kit named {display_name(kits[first_name])} already exists!")
-        return
-
-    kits[first_name] = {
-        "first_name": first_name,
-        "second_name": None,
+    characters[ctx.author.id] = {
+        "prefix": prefix,
         "rank": "kit",
-        "strength": random.randint(1, 10),
-        "agility": random.randint(1, 10),
-        "intelligence": random.randint(1, 10),
-        "age": 0,
-        "clan": "None"
+        "moons": 0,
+        "suffix": None
     }
 
-    await ctx.send(f"🐣 {display_name(kits[first_name])} has been born!")
-
+    await ctx.send(f"{name} has been born into the Clan! 🐾")
 
 @bot.command()
 async def age(ctx, *, name):
@@ -107,6 +97,66 @@ async def clan(ctx, *, args):
 
     kits[first_name]["clan"] = clan_name
     await ctx.send(f"{display_name(kits[first_name])} has joined {clan_name} Clan!")
+
+@bot.command()
+@commands.has_permissions(administrator=True)
+async def make_apprentice(ctx, member: discord.Member):
+    if member.id not in characters:
+        await ctx.send("That player has no character.")
+        return
+
+    char = characters[member.id]
+
+    if char["rank"] != "kit":
+        await ctx.send("They are not a kit.")
+        return
+
+    if char["moons"] < 6:
+        await ctx.send("They must be at least 6 moons old to become an apprentice.")
+        return
+
+    char["rank"] = "apprentice"
+    name = f"{char['prefix']}paw"
+
+    await ctx.send(f"{member.mention} has been named **{name}**, apprentice of the Clan! 🐾")
+
+@bot.command()
+async def choose_suffix(ctx, suffix):
+    if ctx.author.id not in characters:
+        await ctx.send("You don't have a character.")
+        return
+
+    char = characters[ctx.author.id]
+
+    if char["rank"] != "apprentice":
+        await ctx.send("Only apprentices can choose their warrior suffix.")
+        return
+
+    char["suffix"] = suffix
+
+    await ctx.send(f"You have chosen the warrior name **{char['prefix']}{suffix}**.")
+
+@bot.command()
+@commands.has_permissions(administrator=True)
+async def make_warrior(ctx, member: discord.Member):
+    if member.id not in characters:
+        await ctx.send("That player has no character.")
+        return
+
+    char = characters[member.id]
+
+    if char["rank"] != "apprentice":
+        await ctx.send("They are not an apprentice.")
+        return
+
+    if not char["suffix"]:
+        await ctx.send("They have not chosen their warrior suffix yet.")
+        return
+
+    char["rank"] = "warrior"
+    name = f"{char['prefix']}{char['suffix']}"
+
+    await ctx.send(f"{member.mention} is now **{name}**, a warrior of the Clan! 🐾")
 
 @bot.command()
 async def ping(ctx):
