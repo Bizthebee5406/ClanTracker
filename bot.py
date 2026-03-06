@@ -14,19 +14,6 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 kits = {}
 characters = {}
 
-def display_name(kit):
-    """Return the full display name based on rank."""
-    first = kit["first_name"]
-    rank = kit["rank"]
-
-    if rank == "kit":
-        return f"{first}kit"
-    elif rank == "apprentice":
-        return f"{first}paw"
-    elif rank == "warrior":
-        second = kit.get("second_name", "")
-        return f"{first}{second}" if second else f"{first}"
-
 @bot.event
 async def on_ready():
     print(f"{bot.user} is online and ready!")
@@ -163,5 +150,19 @@ async def make_warrior(ctx, member: discord.Member):
 @bot.command()
 async def ping(ctx):
     await ctx.send("ClanTracker is active! 🐾")
+
+def display_name(kit):
+    """Return the full display name based on rank."""
+    first = kit["first_name"]
+    rank = kit["rank"]
+
+    if rank == "kit":
+        return f"{first}kit"
+    elif rank == "apprentice":
+        return f"{first}paw"
+    elif rank == "warrior":
+        second = kit.get("second_name", "")
+        return f"{first}{second}" if second else f"{first}"
+
 
 bot.run(TOKEN)
