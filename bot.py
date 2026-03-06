@@ -32,15 +32,22 @@ async def kit(ctx, prefix):
 
 @bot.command()
 async def age(ctx, moons: int):
+    # Check if player has a character
     if ctx.author.id not in characters:
-        await ctx.send("You don't have a character.")
+        await ctx.send("You don't have a character yet. Use !kit <name> first.")
         return
 
+    # Add moons
     characters[ctx.author.id]["moons"] += moons
     moons_now = characters[ctx.author.id]["moons"]
 
-    await ctx.send(f"🌙 You are now {moons_now} moons old!")
-
+    # Determine the rank automatically (kit -> apprentice at 6 moons)
+    if characters[ctx.author.id]["rank"] == "kit" and moons_now >= 6:
+        characters[ctx.author.id]["rank"] = "apprentice"
+        name = f"{characters[ctx.author.id]['prefix']}paw"
+        await ctx.send(f"🌙 You are now {moons_now} moons old and have been promoted to **apprentice**! Your name is now {name} 🐾")
+    else:
+        await ctx.send(f"🌙 You are now {moons_now} moons old!")
 @bot.command()
 async def stats(ctx):
     if ctx.author.id not in characters:
