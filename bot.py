@@ -11,7 +11,6 @@ intents.message_content = True
 
 bot = commands.Bot(command_prefix="!", intents=intents)
 
-kits = {}
 characters = {}
 
 @bot.event
@@ -29,27 +28,18 @@ async def kit(ctx, prefix):
         "suffix": None
     }
 
-    save_characters()
-
     await ctx.send(f"{name} has been born into the Clan! 🐾")
 
 @bot.command()
-async def age(ctx, name):
-    first_name = name.strip().split()[0]
-
-    if first_name not in kits:
-        await ctx.send("That kit does not exist.")
+async def age(ctx, moons: int):
+    if ctx.author.id not in characters:
+        await ctx.send("You don't have a character.")
         return
 
-    kits[first_name]["age"] += 1
-    kit = kits[first_name]
+    characters[ctx.author.id]["moons"] += moons
+    moons_now = characters[ctx.author.id]["moons"]
 
-    # Example: promote to apprentice at age 3
-    if kit["age"] >= 3 and kit["rank"] == "kit":
-        kit["rank"] = "apprentice"
-        await ctx.send(f"🌙 {display_name(kit)} is now an apprentice!")
-    else:
-        await ctx.send(f"🌙 {display_name(kit)} is now {kit['age']} moons old!")
+    await ctx.send(f"🌙 You are now {moons_now} moons old!")
 
 @bot.command()
 async def stats(ctx, *, name):
