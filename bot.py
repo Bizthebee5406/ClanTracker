@@ -32,7 +32,7 @@ async def on_ready():
     print(f"{bot.user} is online and ready!")
 
 @bot.command()
-async def create_kit(ctx, name):
+async def create_kit(ctx, prefix):
     name = f"{prefix}kit"
 
     characters[ctx.author.id] = {
