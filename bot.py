@@ -20,48 +20,48 @@ async def on_ready():
     await tree.sync()
     print(f"{bot.user} is online and ready!")
     
-@tree.command()
-async def kit(ctx, prefix):
+@tree.command(name="kit")
+async def kit(interaction: discord.Interaction, prefix: str):
     name = f"{prefix}kit"
 
-    characters[ctx.author.id] = {
+    characters[interaction.user.id] = {
         "prefix": prefix,
         "rank": "kit",
         "moons": 0,
         "suffix": None
     }
 
-    await ctx.send(f"{name} has been born into the Clan! 🐾")
+    await interaction.response.send_message(f"{name} has been born into the Clan! 🐾")
+    
+@tree.command(name="age")
+async def age(interaction: discord.Interaction, moons: int):
 
-@tree.command()
-async def age(ctx, moons: int):
-    # Check if player has a character
-    if ctx.author.id not in characters:
-        await ctx.send("You don't have a character yet. Use !kit <name> first.")
+    if interaction.user.id not in characters:
+        await interaction.response.send_message("You don't have a character yet. Use /kit first.")
         return
 
-    # Add moons
-    characters[ctx.author.id]["moons"] += moons
-    moons_now = characters[ctx.author.id]["moons"]
+    characters[interaction.user.id]["moons"] += moons
+    moons_now = characters[interaction.user.id]["moons"]
 
-    # Determine the rank automatically (kit -> apprentice at 6 moons)
-    if characters[ctx.author.id]["rank"] == "kit" and moons_now >= 6:
-        characters[ctx.author.id]["rank"] = "apprentice"
-        name = f"{characters[ctx.author.id]['prefix']}paw"
-        await ctx.send(f"🌙 You are now {moons_now} moons old and have been promoted to **apprentice**! Your name is now {name} 🐾")
+    if characters[interaction.user.id]["rank"] == "kit" and moons_now >= 6:
+        characters[interaction.user.id]["rank"] = "apprentice"
+        name = f"{characters[interaction.user.id]['prefix']}paw"
+
+        await interaction.response.send_message(
+            f"🌙 You are now {moons_now} moons old and have been promoted to **apprentice**! Your name is now **{name}** 🐾"
+        )
     else:
-        await ctx.send(f"🌙 You are now {moons_now} moons old!")
+        await interaction.response.send_message(f"🌙 You are now {moons_now} moons old!")
         
-@tree.command()
-async def stats(ctx):
-    # Make sure the player has a character
-    if ctx.author.id not in characters:
-        await ctx.send("You don't have a character yet. Use !kit <name> first.")
+@tree.command(name="stats")
+async def stats(interaction: discord.Interaction):
+
+    if interaction.user.id not in characters:
+        await interaction.response.send_message("You don't have a character yet. Use /kit first.")
         return
 
-    char = characters[ctx.author.id]
+    char = characters[interaction.user.id]
 
-    # Determine display name
     if char["rank"] == "kit":
         display = f"{char['prefix']}kit"
     elif char["rank"] == "apprentice":
@@ -71,7 +71,7 @@ async def stats(ctx):
     else:
         display = char["prefix"]
 
-    await ctx.send(
+    await interaction.response.send_message(
         f"📜 **{display}**\n"
         f"Rank: {char['rank']}\n"
         f"Age: {char['moons']} moons"
@@ -109,7 +109,7 @@ async def make_apprentice(ctx, member: discord.Member):
 
     await ctx.send(f"{member.mention} has been named **{name}**, apprentice of the Clan! 🐾")
 
-@tree.command()
+@bot.command()
 async def choose_suffix(ctx, suffix):
     if ctx.author.id not in characters:
         await ctx.send("You don't have a character.")
@@ -125,7 +125,7 @@ async def choose_suffix(ctx, suffix):
 
     await ctx.send(f"You have chosen the warrior name **{char['prefix']}{suffix}**.")
 
-@tree.command()
+@bot.command()
 @commands.has_permissions(administrator=True)
 async def make_warrior(ctx, member: discord.Member):
     if member.id not in characters:
