@@ -3,6 +3,7 @@ from discord.ext import commands
 import os
 import random 
 import json
+from discord import app_commands
 
 TOKEN = os.environ["TOKEN"]
 
@@ -10,14 +11,16 @@ intents = discord.Intents.default()
 intents.message_content = True
 
 bot = commands.Bot(command_prefix="!", intents=intents)
+tree = bot.tree
 
 characters = {}
 
 @bot.event
 async def on_ready():
+    await tree.sync()
     print(f"{bot.user} is online and ready!")
-
-@bot.command()
+    
+@tree.command()
 async def kit(ctx, prefix):
     name = f"{prefix}kit"
 
@@ -30,7 +33,7 @@ async def kit(ctx, prefix):
 
     await ctx.send(f"{name} has been born into the Clan! 🐾")
 
-@bot.command()
+@tree.command()
 async def age(ctx, moons: int):
     # Check if player has a character
     if ctx.author.id not in characters:
@@ -49,7 +52,7 @@ async def age(ctx, moons: int):
     else:
         await ctx.send(f"🌙 You are now {moons_now} moons old!")
         
-@bot.command()
+@tree.command()
 async def stats(ctx):
     # Make sure the player has a character
     if ctx.author.id not in characters:
@@ -74,7 +77,7 @@ async def stats(ctx):
         f"Age: {char['moons']} moons"
     )
     
-@bot.command()
+@tree.command()
 async def clan(ctx, *, clan_name):
     # Make sure the player has a character
     if ctx.author.id not in characters:
@@ -84,7 +87,7 @@ async def clan(ctx, *, clan_name):
     char = characters[ctx.author.id]
     char["clan"] = clan_name
     await ctx.send(f"{char['prefix']} has joined **{clan_name} Clan**! 🐾")
-@bot.command()
+@tree.command()
 @commands.has_permissions(administrator=True)
 async def make_apprentice(ctx, member: discord.Member):
     if member.id not in characters:
@@ -106,7 +109,7 @@ async def make_apprentice(ctx, member: discord.Member):
 
     await ctx.send(f"{member.mention} has been named **{name}**, apprentice of the Clan! 🐾")
 
-@bot.command()
+@tree.command()
 async def choose_suffix(ctx, suffix):
     if ctx.author.id not in characters:
         await ctx.send("You don't have a character.")
@@ -122,7 +125,7 @@ async def choose_suffix(ctx, suffix):
 
     await ctx.send(f"You have chosen the warrior name **{char['prefix']}{suffix}**.")
 
-@bot.command()
+@tree.command()
 @commands.has_permissions(administrator=True)
 async def make_warrior(ctx, member: discord.Member):
     if member.id not in characters:
