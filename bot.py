@@ -215,24 +215,46 @@ async def choose_suffix(interaction: discord.Interaction, suffix: str):
     await interaction.response.send_message(
         f"Your future warrior name will be **{char['prefix']}{suffix}**.")
 
-stats = char["stats"]
+@tree.command(name="stats", description="View your character stats")
+async def stats(interaction: discord.Interaction):
 
-await interaction.response.send_message(
-    f"📜 **{display}**\n"
-    f"Rank: {char['rank']}\n"
-    f"Age: {char['moons']} moons\n"
-    f"Clan: {clan}\n\n"
-    
-    f"**Attributes**\n"
-    f"Strength: {stats['strength']}\n"
-    f"Perception: {stats['perception']}\n"
-    f"Dexterity: {stats['dexterity']}\n"
-    f"Speed: {stats['speed']}\n"
-    f"Intelligence: {stats['intelligence']}\n"
-    f"Luck: {stats['luck']}\n"
-    f"Charisma: {stats['charisma']}\n\n"
-    
-    f"Clan Skill: {char['specialty']}")
+    uid = interaction.user.id
+
+    if uid not in characters:
+        await interaction.response.send_message("You don't have a character yet.")
+        return
+
+    char = characters[uid]
+    stats = char["stats"]
+
+    clan = char["clan"] if char["clan"] else "None"
+
+    if char["rank"] == "kit":
+        display = f"{char['prefix']}kit"
+    elif char["rank"] == "apprentice":
+        display = f"{char['prefix']}paw"
+    elif char["rank"] == "warrior":
+        display = f"{char['prefix']}{char['suffix']}"
+    else:
+        display = char["prefix"]
+
+    await interaction.response.send_message(
+        f"📜 **{display}**\n"
+        f"Rank: {char['rank']}\n"
+        f"Age: {char['moons']} moons\n"
+        f"Clan: {clan}\n\n"
+
+        f"**Attributes**\n"
+        f"Strength: {stats['strength']}\n"
+        f"Perception: {stats['perception']}\n"
+        f"Dexterity: {stats['dexterity']}\n"
+        f"Speed: {stats['speed']}\n"
+        f"Intelligence: {stats['intelligence']}\n"
+        f"Luck: {stats['luck']}\n"
+        f"Charisma: {stats['charisma']}\n\n"
+
+        f"Clan Skill: {char['specialty']} ({char['skill_value']})"
+    )
 
 @tree.command(name="hunt", description="Go hunting for the clan")
 async def hunt(interaction: discord.Interaction):
