@@ -264,20 +264,21 @@ async def stats(interaction: discord.Interaction):
 @tree.command(name="hunt", description="Go hunting for the clan")
 async def hunt(interaction: discord.Interaction):
 
-    if char["rank"] == "kit":
-    await interaction.response.send_message("Kits are too young to hunt!")
-    return
-    
-    global clan_prey_pile
-
     uid = interaction.user.id
 
+    # Check if player has a character
     if uid not in characters:
         await interaction.response.send_message("Create a character first with /kit.")
         return
 
     char = characters[uid]
 
+    # Kits cannot hunt
+    if char["rank"] == "kit":
+        await interaction.response.send_message("Kits are too young to hunt!")
+        return
+
+    # Must belong to a clan
     if not char["clan"]:
         await interaction.response.send_message("Join a clan first with /clan.")
         return
@@ -288,19 +289,22 @@ async def hunt(interaction: discord.Interaction):
     hunt_skill = (
         stats["perception"] +
         stats["dexterity"] +
-        stats["luck"])
+        stats["luck"]
+    )
 
-    specialty = char["specialty"]
-
+    # Add clan specialty bonus
     hunt_skill += char["skill_value"]
-    
-    roll = random.randint(1,20)
 
+    # Dice roll
+    roll = random.randint(1, 20)
     total = hunt_skill + roll
 
     clan = char["clan"]
+
+    # Get prey pool for clan + season
     prey_pool = prey_tables[clan][season]
 
+    # Random hunt intro message
     intro = random.choice(hunt_messages)
 
     if total >= 20:
@@ -308,7 +312,8 @@ async def hunt(interaction: discord.Interaction):
         prey = random.choice(list(prey_pool.keys()))
         value = prey_pool[prey]
 
-        clan_prey_pile += value
+        # Add prey to correct clan pile
+        clan_prey_piles[clan] += value
 
         await interaction.response.send_message(
             f"{intro}\n\n"
@@ -316,7 +321,7 @@ async def hunt(interaction: discord.Interaction):
             f"Skill bonus: **{hunt_skill}**\n\n"
             f"🐾 You caught a **{prey}**!\n"
             f"🍖 It adds **{value} prey** to the clan pile.\n\n"
-            f"Clan prey pile: **{clan_prey_pile}**"
+            f"Clan prey pile: **{clan_prey_piles[clan]}**"
         )
 
     else:
@@ -325,7 +330,8 @@ async def hunt(interaction: discord.Interaction):
             f"{intro}\n\n"
             f"🎯 Hunting roll: **{roll}**\n"
             f"Skill bonus: **{hunt_skill}**\n\n"
-            "💨 The prey escapes!")
+            "💨 The prey escapes!"
+        )
         
 @tree.command(name="battle", description="Challenge another cat")
 async def battle(interaction: discord.Interaction, opponent: discord.Member):
