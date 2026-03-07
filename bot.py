@@ -73,6 +73,22 @@ hunt_messages = [
     "You creep forward pawstep by pawstep..."
 ]
 
+def generate_stats():
+    return {
+        "strength": random.randint(0,10),
+        "perception": random.randint(0,10),
+        "dexterity": random.randint(0,10),
+        "speed": random.randint(0,10),
+        "intelligence": random.randint(0,10),
+        "luck": random.randint(0,10),
+        "charisma": random.randint(0,10)}
+
+clan_specialties = {
+    "Thunder": "tracking",
+    "River": "swimming",
+    "Shadow": "stealth",
+    "Wind": "endurance"}
+
 @bot.event
 async def on_ready():
     await tree.sync()
@@ -81,19 +97,43 @@ async def on_ready():
 @tree.command(name="kit", description="Create your kit")
 async def kit(interaction: discord.Interaction, prefix: str):
 
+    if interaction.user.id in characters:
+        await interaction.response.send_message("You already have a character.")
+        return
+
+    stats = {
+        "strength": random.randint(0,10),
+        "perception": random.randint(0,10),
+        "dexterity": random.randint(0,10),
+        "speed": random.randint(0,10),
+        "intelligence": random.randint(0,10),
+        "luck": random.randint(0,10),
+        "charisma": random.randint(0,10)
+    }
+
     characters[interaction.user.id] = {
         "prefix": prefix,
         "rank": "kit",
         "moons": 0,
         "suffix": None,
         "clan": None,
-        "prey": 0,
-        "health": 100
+        "health": 100,
+        "stats": stats,
+        "specialty": None,
+        "skill_value": 0
     }
 
     await interaction.response.send_message(
-        f"🐾 **{prefix}kit** has been born into the Clan!🐾")
-
+        f"🐾 **{prefix}kit** has been born into the Clan!\n\n"
+        f"**Base Stats**\n"
+        f"Strength: {stats['strength']}\n"
+        f"Perception: {stats['perception']}\n"
+        f"Dexterity: {stats['dexterity']}\n"
+        f"Speed: {stats['speed']}\n"
+        f"Intelligence: {stats['intelligence']}\n"
+        f"Luck: {stats['luck']}\n"
+        f"Charisma: {stats['charisma']}")
+    
 @tree.command(name="age", description="Age your character")
 async def age(interaction: discord.Interaction, moons: int):
 
@@ -118,36 +158,6 @@ async def age(interaction: discord.Interaction, moons: int):
 
     await interaction.response.send_message(f"🌙 You are now **{moons_now} moons** old!")
 
-@tree.command(name="stats", description="View your character")
-async def stats(interaction: discord.Interaction):
-
-    uid = interaction.user.id
-
-    if uid not in characters:
-        await interaction.response.send_message("You don't have a character yet.")
-        return
-
-    char = characters[uid]
-
-    if char["rank"] == "kit":
-        display = f"{char['prefix']}kit"
-    elif char["rank"] == "apprentice":
-        display = f"{char['prefix']}paw"
-    elif char["rank"] == "warrior":
-        display = f"{char['prefix']}{char['suffix']}"
-    else:
-        display = char["prefix"]
-
-    clan = char["clan"] if char["clan"] else "None"
-
-    await interaction.response.send_message(
-        f"📜 **{display}**\n"
-        f"Rank: {char['rank']}\n"
-        f"Age: {char['moons']} moons\n"
-        f"Clan: {clan}\n"
-        f"Prey caught: {char['prey']}\n"
-        f"Health: {char['health']}")
-
 @tree.command(name="clan", description="Join a clan")
 async def clan(interaction: discord.Interaction, clan_name: str):
 
@@ -157,11 +167,34 @@ async def clan(interaction: discord.Interaction, clan_name: str):
         await interaction.response.send_message("You don't have a character.")
         return
 
-    characters[uid]["clan"] = clan_name
+    clan_name = clan_name.capitalize()
+
+    if clan_name not in ["Thunder", "River", "Shadow", "Wind"]:
+        await interaction.response.send_message(
+            "Valid clans are: Thunder, River, Shadow, Wind."
+        )
+        return
+
+    char = characters[uid]
+
+    char["clan"] = clan_name
+
+    clan_skills = {
+        "Thunder": "tracking",
+        "River": "swimming",
+        "Shadow": "stealth",
+        "Wind": "endurance"
+    }
+
+    specialty = clan_skills[clan_name]
+
+    char["specialty"] = specialty
+    char["skill_value"] = random.randint(4,10)
 
     await interaction.response.send_message(
-        f"{characters[uid]['prefix']} has joined **{clan_name} Clan**! 🐾")
-
+        f"{char['prefix']} has joined **{clan_name}Clan**!\n"
+        f"Clan skill gained: **{specialty} ({char['skill_value']})** 🐾")
+    
 @tree.command(name="choose_suffix", description="Choose your warrior suffix")
 async def choose_suffix(interaction: discord.Interaction, suffix: str):
 
@@ -182,6 +215,25 @@ async def choose_suffix(interaction: discord.Interaction, suffix: str):
     await interaction.response.send_message(
         f"Your future warrior name will be **{char['prefix']}{suffix}**.")
 
+stats = char["stats"]
+
+await interaction.response.send_message(
+    f"📜 **{display}**\n"
+    f"Rank: {char['rank']}\n"
+    f"Age: {char['moons']} moons\n"
+    f"Clan: {clan}\n\n"
+    
+    f"**Attributes**\n"
+    f"Strength: {stats['strength']}\n"
+    f"Perception: {stats['perception']}\n"
+    f"Dexterity: {stats['dexterity']}\n"
+    f"Speed: {stats['speed']}\n"
+    f"Intelligence: {stats['intelligence']}\n"
+    f"Luck: {stats['luck']}\n"
+    f"Charisma: {stats['charisma']}\n\n"
+    
+    f"Clan Skill: {char['specialty']}")
+
 @tree.command(name="hunt", description="Go hunting for the clan")
 async def hunt(interaction: discord.Interaction):
 
@@ -196,24 +248,38 @@ async def hunt(interaction: discord.Interaction):
     char = characters[uid]
 
     if not char["clan"]:
-        await interaction.response.send_message("You must join a clan first with /clan.")
+        await interaction.response.send_message("Join a clan first with /clan.")
         return
+
+    stats = char["stats"]
+
+    # Base hunting skill
+    hunt_skill = (
+        stats["perception"] +
+        stats["dexterity"] +
+        stats["luck"])
+
+    specialty = char["specialty"]
+
+    if specialty == "tracking":
+        hunt_skill += 3
+    elif specialty == "stealth":
+        hunt_skill += 3
+    elif specialty == "swimming":
+        hunt_skill += 3
+    elif specialty == "endurance":
+        hunt_skill += 2
+
+    roll = random.randint(1,20)
+
+    total = hunt_skill + roll
 
     clan = char["clan"]
-
-    if clan not in prey_tables:
-        await interaction.response.send_message("Your clan has no hunting territory configured.")
-        return
-
     prey_pool = prey_tables[clan][season]
 
     intro = random.choice(hunt_messages)
 
-    success_roll = random.randint(1, 100)
-
-    difficulty = 60 if season == "greenleaf" else 40
-
-    if success_roll <= difficulty:
+    if total >= 20:
 
         prey = random.choice(list(prey_pool.keys()))
         value = prey_pool[prey]
@@ -222,68 +288,93 @@ async def hunt(interaction: discord.Interaction):
 
         await interaction.response.send_message(
             f"{intro}\n\n"
+            f"🎯 Hunting roll: **{roll}**\n"
+            f"Skill bonus: **{hunt_skill}**\n\n"
             f"🐾 You caught a **{prey}**!\n"
             f"🍖 It adds **{value} prey** to the clan pile.\n\n"
-            f"Clan prey pile: **{clan_prey_pile}**")
+            f"Clan prey pile: **{clan_prey_pile}**"
+        )
 
     else:
 
         await interaction.response.send_message(
             f"{intro}\n\n"
-            "💨 The prey escapes and you return empty-pawed.")
-
-@tree.command(name="prey_pile", description="View the clan prey pile")
-async def prey_pile(interaction: discord.Interaction):
-
-    await interaction.response.send_message(
-        f"🍖 Clan prey pile currently contains **{clan_prey_pile} prey value**."
-    )
-
-@tree.command(name="battle", description="Challenge another cat to a duel")
+            f"🎯 Hunting roll: **{roll}**\n"
+            f"Skill bonus: **{hunt_skill}**\n\n"
+            "💨 The prey escapes!")
+        
+@tree.command(name="battle", description="Challenge another cat")
 async def battle(interaction: discord.Interaction, opponent: discord.Member):
-    
-    uid = interaction.user.id
-    opp_id = opponent.id
 
-    # Check if both have characters
+    uid = interaction.user.id
+    oid = opponent.id
+
     if uid not in characters:
-        await interaction.response.send_message("You don't have a character. Use /kit first.")
+        await interaction.response.send_message("You don't have a character.")
         return
-    if opp_id not in characters:
-        await interaction.response.send_message(f"{opponent.display_name} has no character.")
+
+    if oid not in characters:
+        await interaction.response.send_message("That player has no character.")
         return
 
     attacker = characters[uid]
-    defender = characters[opp_id]
+    defender = characters[oid]
 
-    # Function to get full name
+    atk_stats = attacker["stats"]
+    def_stats = defender["stats"]
+
+    # Calculate combat power
+    attack_power = (
+        atk_stats["strength"] +
+        atk_stats["speed"] +
+        atk_stats["dexterity"] +
+        atk_stats["luck"]
+    )
+
+    defense_power = (
+        def_stats["strength"] +
+        def_stats["speed"] +
+        def_stats["dexterity"] +
+        def_stats["intelligence"]
+    )
+
+    atk_roll = random.randint(1,20)
+    def_roll = random.randint(1,20)
+
+    atk_total = attack_power + atk_roll
+    def_total = defense_power + def_roll
+
     def full_name(char):
         if char["rank"] == "kit":
             return f"{char['prefix']}kit"
         elif char["rank"] == "apprentice":
             return f"{char['prefix']}paw"
         elif char["rank"] == "warrior":
-            suffix = char["suffix"] if char["suffix"] else ""
-            return f"{char['prefix']}{suffix}"
+            return f"{char['prefix']}{char['suffix']}"
         else:
             return char["prefix"]
 
     attacker_name = full_name(attacker)
     defender_name = full_name(defender)
 
-    # Simple battle logic: random roll + small bonus for warrior rank
-    atk_roll = random.randint(1, 20) + (2 if attacker["rank"] == "warrior" else 0)
-    def_roll = random.randint(1, 20) + (2 if defender["rank"] == "warrior" else 0)
+    if atk_total > def_total:
 
-    if atk_roll > def_roll:
-        result = f"⚔️ **{attacker_name}** wins the duel against **{defender_name}**!"
-    elif def_roll > atk_roll:
-        result = f"⚔️ **{defender_name}** defends successfully against **{attacker_name}**!"
+        result = f"⚔️ **{attacker_name}** wins the battle!"
+
+    elif def_total > atk_total:
+
+        result = f"⚔️ **{defender_name}** wins the battle!"
+
     else:
-        result = f"🤝 The duel between **{attacker_name}** and **{defender_name}** ends in a tie!"
 
-    await interaction.response.send_message(result)
+        result = "⚔️ The battle ends in a draw!"
 
+    await interaction.response.send_message(
+        f"🐾 Battle Begins!\n\n"
+        f"{attacker_name} roll: **{atk_roll}** + {attack_power}\n"
+        f"{defender_name} roll: **{def_roll}** + {defense_power}\n\n"
+        f"{result}")
+    
 @tree.command(name="make_apprentice")
 @app_commands.checks.has_permissions(administrator=True)
 async def make_apprentice(interaction: discord.Interaction, member: discord.Member):
