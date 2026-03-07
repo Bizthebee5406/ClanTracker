@@ -264,6 +264,10 @@ async def stats(interaction: discord.Interaction):
 @tree.command(name="hunt", description="Go hunting for the clan")
 async def hunt(interaction: discord.Interaction):
 
+    if char["rank"] == "kit":
+    await interaction.response.send_message("Kits are too young to hunt!")
+    return
+    
     global clan_prey_pile
 
     uid = interaction.user.id
