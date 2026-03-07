@@ -283,15 +283,8 @@ async def hunt(interaction: discord.Interaction):
 
     specialty = char["specialty"]
 
-    if specialty == "tracking":
-        hunt_skill += 3
-    elif specialty == "stealth":
-        hunt_skill += 3
-    elif specialty == "swimming":
-        hunt_skill += 3
-    elif specialty == "endurance":
-        hunt_skill += 2
-
+    hunt_skill += char["skill_value"]
+    
     roll = random.randint(1,20)
 
     total = hunt_skill + roll
