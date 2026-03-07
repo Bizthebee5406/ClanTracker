@@ -12,7 +12,12 @@ tree = bot.tree
 
 characters = {}
 
-clan_prey_pile = 0
+clan_prey_piles = {
+    "Thunder": 0,
+    "River": 0,
+    "Shadow": 0,
+    "Wind": 0
+}
 
 season = "greenleaf"
 
