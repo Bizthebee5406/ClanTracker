@@ -239,38 +239,50 @@ async def prey_pile(interaction: discord.Interaction):
         f"🍖 Clan prey pile currently contains **{clan_prey_pile} prey value**."
     )
 
-@tree.command(name="battle", description="Battle another cat")
+@tree.command(name="battle", description="Challenge another cat to a duel")
 async def battle(interaction: discord.Interaction, opponent: discord.Member):
-
+    
     uid = interaction.user.id
-    oid = opponent.id
+    opp_id = opponent.id
 
+    # Check if both have characters
     if uid not in characters:
-        await interaction.response.send_message("You don't have a character.")
+        await interaction.response.send_message("You don't have a character. Use /kit first.")
+        return
+    if opp_id not in characters:
+        await interaction.response.send_message(f"{opponent.display_name} has no character.")
         return
 
-    if oid not in characters:
-        await interaction.response.send_message("That player has no character.")
-        return
+    attacker = characters[uid]
+    defender = characters[opp_id]
 
-    player_roll = random.randint(1, 20)
-    opponent_roll = random.randint(1, 20)
+    # Function to get full name
+    def full_name(char):
+        if char["rank"] == "kit":
+            return f"{char['prefix']}kit"
+        elif char["rank"] == "apprentice":
+            return f"{char['prefix']}paw"
+        elif char["rank"] == "warrior":
+            suffix = char["suffix"] if char["suffix"] else ""
+            return f"{char['prefix']}{suffix}"
+        else:
+            return char["prefix"]
 
-    player_name = characters[uid]["prefix"]
-    opponent_name = characters[oid]["prefix"]
+    attacker_name = full_name(attacker)
+    defender_name = full_name(defender)
 
-    if player_roll > opponent_roll:
-        result = f"⚔️ {player_name} defeats {opponent_name} in battle!"
-    elif opponent_roll > player_roll:
-        result = f"⚔️ {opponent_name} defeats {player_name} in battle!"
+    # Simple battle logic: random roll + small bonus for warrior rank
+    atk_roll = random.randint(1, 20) + (2 if attacker["rank"] == "warrior" else 0)
+    def_roll = random.randint(1, 20) + (2 if defender["rank"] == "warrior" else 0)
+
+    if atk_roll > def_roll:
+        result = f"⚔️ **{attacker_name}** wins the duel against **{defender_name}**!"
+    elif def_roll > atk_roll:
+        result = f"⚔️ **{defender_name}** defends successfully against **{attacker_name}**!"
     else:
-        result = "⚔️ The battle ends in a draw!"
+        result = f"🤝 The duel between **{attacker_name}** and **{defender_name}** ends in a tie!"
 
-    await interaction.response.send_message(
-        f"🐾 Battle Begins!\n"
-        f"{player_name} rolled **{player_roll}**\n"
-        f"{opponent_name} rolled **{opponent_roll}**\n\n"
-        f"{result}")
+    await interaction.response.send_message(result)
 
 @tree.command(name="make_apprentice")
 @app_commands.checks.has_permissions(administrator=True)
