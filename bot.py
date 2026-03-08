@@ -196,7 +196,7 @@ async def profile(interaction: discord.Interaction):
     )
 
 # ----------------------- HUNT COMMAND -----------------------
-@tree.command(name="hunt", description="Go hunting for the clan")
+@bot.tree.command(name="hunt", description="Go hunting for the clan")
 async def hunt(interaction: discord.Interaction):
     uid = interaction.user.id
 
@@ -229,13 +229,31 @@ async def hunt(interaction: discord.Interaction):
         prey = random.choice(list(prey_pool.keys()))
         value = prey_pool[prey]
 
+        # Save the prey info for the eat/donate choice
+        pending_hunts[uid] = {
+            "prey": prey,
+            "value": value,
+            "clan": clan
+        }
+
         # Prompt the player: eat or add to fresh kill pile
         await interaction.response.send_message(
             f"{intro}\n\n"
             f"🎯 Hunting roll: **{roll}**\n"
             f"Skill bonus: **{hunt_skill}**\n\n"
             f"🐾 You caught a **{prey}**!\n"
-            f"Do you want to **eat it** or **add it to the fresh kill pile**?"
+            f"Do you want to **eat it** or **add it to the fresh kill pile**? Use /eat or /donate."
+        )
+
+    else:
+        # Reduce hunger for effort
+        char["hunger"] = max(char["hunger"] - 10, 0)
+        await interaction.response.send_message(
+            f"{intro}\n\n"
+            f"🎯 Hunting roll: **{roll}**\n"
+            f"Skill bonus: **{hunt_skill}**\n\n"
+            f"💨 The prey escapes!\n"
+            f"🍽️ Your hunger is now **{char['hunger']}**"
         )
 
 pending_hunts = {}  # temporary storage for decisions
