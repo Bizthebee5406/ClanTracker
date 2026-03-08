@@ -125,6 +125,48 @@ async def age(interaction: discord.Interaction, moons: int):
 
     await interaction.response.send_message(f"🌙 You are now **{moons_now} moons** old!")
 
+@bot.tree.command(name="make_warrior", description="Promote an apprentice to warrior")
+@app_commands.checks.has_permissions(administrator=True)
+async def make_warrior(interaction: discord.Interaction, member: discord.Member):
+
+    uid = member.id
+
+    if uid not in characters:
+        await interaction.response.send_message("That player doesn't have a character.")
+        return
+
+    char = characters[uid]
+
+    if char["rank"] != "apprentice":
+        await interaction.response.send_message("Only apprentices can be promoted to warrior.")
+        return
+
+    if not char["suffix"]:
+        await interaction.response.send_message(
+            "This apprentice hasn't chosen a warrior suffix yet. Use /choose_suffix first."
+        )
+        return
+
+    prefix = char["prefix"]
+    suffix = char["suffix"]
+    clan = char["clan"]
+
+    apprentice_name = f"{prefix}paw"
+    warrior_name = f"{prefix}{suffix}"
+
+    char["rank"] = "warrior"
+
+    ceremony = (
+        f"🌟 **Warrior Ceremony** 🌟\n\n"
+        f"I, leader of {clan}Clan, call upon my warrior ancestors to look down on this apprentice.\n\n"
+        f"{apprentice_name}, you have trained hard and proven yourself loyal and brave.\n\n"
+        f"From this moment forward, you will be known as **{warrior_name}**.\n\n"
+        f"StarClan honors your courage and welcomes you as a full warrior of **{clan}Clan**!\n\n"
+        f"🎉 Everyone chant **{warrior_name}! {warrior_name}! {warrior_name}!**"
+    )
+
+    await interaction.response.send_message(ceremony)
+
 # ----------------------- CLAN COMMAND -----------------------
 @bot.tree.command(name="clan", description="Join a clan")
 async def clan(interaction: discord.Interaction, clan_name: str):
@@ -312,18 +354,59 @@ async def preypile(interaction: discord.Interaction):
     clan = char["clan"]
     total_prey = clan_prey_piles.get(clan, 0)
 
-    # Show fresh kill list
+    # Fresh kill display
     if fresh_kill_piles[clan]:
         fresh = ", ".join(fresh_kill_piles[clan])
     else:
         fresh = "None"
 
+    # Food condition message
+    if total_prey <= 5:
+        condition = "⚠️ The prey pile is dangerously low! The clan may start starving."
+    elif total_prey <= 15:
+        condition = "⚠️ The prey pile is getting low. Hunters should patrol soon."
+    else:
+        condition = "✅ The clan is well fed."
+
     await interaction.response.send_message(
         f"🍖 **{clan}Clan Prey Report**\n\n"
         f"Total prey stored: **{total_prey}**\n"
-        f"Fresh kill pile: **{fresh}**"
+        f"Fresh kill pile: **{fresh}**\n\n"
+        f"{condition}"
     )
 
+@bot.tree.command(name="take_prey", description="Take prey from your clan's fresh kill pile")
+async def take_prey(interaction: discord.Interaction):
+
+    uid = interaction.user.id
+
+    if uid not in characters:
+        await interaction.response.send_message("You don't have a character yet! Use /kit.")
+        return
+
+    char = characters[uid]
+
+    if not char["clan"]:
+        await interaction.response.send_message("Join a clan first with /clan.")
+        return
+
+    clan = char["clan"]
+
+    if not fresh_kill_piles[clan]:
+        await interaction.response.send_message(
+            "The fresh kill pile is empty!"
+        )
+        return
+
+    prey = fresh_kill_piles[clan].pop(0)
+
+    # restore hunger
+    char["hunger"] = min(char["hunger"] + 40, 100)
+
+    await interaction.response.send_message(
+        f"🍖 You take a **{prey}** from the fresh kill pile and eat it.\n"
+        f"Your hunger is now **{char['hunger']}**."
+    )
 # ----------------------- BATTLE COMMAND -----------------------
 @bot.tree.command(name="battle", description="Challenge another cat to a fight")
 async def battle(interaction: discord.Interaction, opponent: discord.Member):
