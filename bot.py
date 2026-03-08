@@ -169,6 +169,7 @@ async def age(interaction: discord.Interaction, moons: int):
     await interaction.response.send_message(f"🌙 You are now **{moons_now} moons** old!")
 
 @tree.command(name="clan", description="Join a clan")
+@tree.command(name="clan", description="Join a clan")
 async def clan(interaction: discord.Interaction, clan_name: str):
 
     uid = interaction.user.id
@@ -186,9 +187,9 @@ async def clan(interaction: discord.Interaction, clan_name: str):
         return
 
     char = characters[uid]
-
     char["clan"] = clan_name
 
+    # Clan skills
     clan_skills = {
         "Thunder": "tracking",
         "River": "swimming",
@@ -201,9 +202,28 @@ async def clan(interaction: discord.Interaction, clan_name: str):
     char["specialty"] = specialty
     char["skill_value"] = random.randint(4,10)
 
+    member = interaction.guild.get_member(uid)
+
+    # Role names
+    role_name = f"{clan_name}Clan"
+
+    # Remove other clan roles
+    clan_roles = ["ThunderClan", "RiverClan", "ShadowClan", "WindClan"]
+
+    for role in interaction.guild.roles:
+        if role.name in clan_roles and role in member.roles:
+            await member.remove_roles(role)
+
+    # Add new clan role
+    role = discord.utils.get(interaction.guild.roles, name=role_name)
+
+    if role:
+        await member.add_roles(role)
+
     await interaction.response.send_message(
         f"{char['prefix']} has joined **{clan_name}Clan**!\n"
-        f"Clan skill gained: **{specialty} ({char['skill_value']})** 🐾")
+        f"Clan skill gained: **{specialty} ({char['skill_value']})** 🐾"
+    )
     
 @tree.command(name="choose_suffix", description="Choose your warrior suffix")
 async def choose_suffix(interaction: discord.Interaction, suffix: str):
