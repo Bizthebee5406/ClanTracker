@@ -12,6 +12,7 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 
 characters = {}
 pending_hunts = {}
+pending_battles = {}
 
 clan_prey_piles = {
     "Thunder": 0,
@@ -324,8 +325,9 @@ async def preypile(interaction: discord.Interaction):
     )
 
 # ----------------------- BATTLE COMMAND -----------------------
-@bot.tree.command(name="battle", description="Challenge another cat")
+@bot.tree.command(name="battle", description="Challenge another cat to a fight")
 async def battle(interaction: discord.Interaction, opponent: discord.Member):
+
     uid = interaction.user.id
     oid = opponent.id
 
@@ -333,43 +335,15 @@ async def battle(interaction: discord.Interaction, opponent: discord.Member):
         await interaction.response.send_message("Both players must have a character to battle!")
         return
 
-    attacker = characters[uid]
-    defender = characters[oid]
+    if uid == oid:
+        await interaction.response.send_message("You can't battle yourself!")
+        return
 
-    atk_power = attacker["stats"]["strength"] + attacker["stats"]["speed"] + attacker["stats"]["dexterity"] + attacker["stats"]["luck"]
-    def_power = defender["stats"]["strength"] + defender["stats"]["speed"] + defender["stats"]["dexterity"] + defender["stats"]["intelligence"]
-
-    atk_roll = random.randint(1, 20)
-    def_roll = random.randint(1, 20)
-
-    atk_total = atk_power + atk_roll
-    def_total = def_power + def_roll
-
-    def full_name(char):
-        if char["rank"] == "kit":
-            return f"{char['prefix']}kit"
-        elif char["rank"] == "apprentice":
-            return f"{char['prefix']}paw"
-        elif char["rank"] == "warrior":
-            return f"{char['prefix']}{char['suffix']}"
-        else:
-            return char["prefix"]
-
-    attacker_name = full_name(attacker)
-    defender_name = full_name(defender)
-
-    if atk_total > def_total:
-        result = f"⚔️ **{attacker_name}** wins the battle!"
-    elif def_total > atk_total:
-        result = f"⚔️ **{defender_name}** wins the battle!"
-    else:
-        result = "⚔️ The battle ends in a draw!"
+    pending_battles[oid] = uid
 
     await interaction.response.send_message(
-        f"🐾 Battle Begins!\n\n"
-        f"{attacker_name} roll: **{atk_roll}** + {atk_power}\n"
-        f"{defender_name} roll: **{def_roll}** + {def_power}\n\n"
-        f"{result}"
+        f"⚔️ **{interaction.user.display_name}** has challenged **{opponent.display_name}** to a battle!\n\n"
+        f"{opponent.mention}, do you **/fight** or **/flee**?"
     )
 
 # ----------------------- TRAIN COMMAND -----------------------
@@ -402,6 +376,64 @@ async def train(interaction: discord.Interaction, stat: str):
         f"New {stat.capitalize()}: **{char['stats'][stat]}**"
     )
 
+@bot.tree.command(name="fight", description="Accept a battle challenge")
+async def fight(interaction: discord.Interaction):
+
+    uid = interaction.user.id
+
+    if uid not in pending_battles:
+        await interaction.response.send_message("No one has challenged you to a battle.")
+        return
+
+    attacker_id = pending_battles.pop(uid)
+
+    attacker = characters[attacker_id]
+    defender = characters[uid]
+
+    atk_power = attacker["stats"]["strength"] + attacker["stats"]["speed"] + attacker["stats"]["dexterity"] + attacker["stats"]["luck"]
+    def_power = defender["stats"]["strength"] + defender["stats"]["speed"] + defender["stats"]["dexterity"] + defender["stats"]["intelligence"]
+
+    atk_roll = random.randint(1,20)
+    def_roll = random.randint(1,20)
+
+    atk_total = atk_roll + atk_power
+    def_total = def_roll + def_power
+
+    if atk_total > def_total:
+        winner = "attacker"
+        defender["health"] -= 20
+    elif def_total > atk_total:
+        winner = "defender"
+        attacker["health"] -= 20
+    else:
+        winner = "draw"
+
+    await interaction.response.send_message(
+        f"⚔️ **Battle Begins!**\n\n"
+        f"Attacker roll: **{atk_roll}** + {atk_power}\n"
+        f"Defender roll: **{def_roll}** + {def_power}\n\n"
+        f"Result: **{winner.upper()}**"
+    )
+
+@bot.tree.command(name="flee", description="Flee from a battle")
+async def flee(interaction: discord.Interaction):
+
+    uid = interaction.user.id
+
+    if uid not in pending_battles:
+        await interaction.response.send_message("No one has challenged you.")
+        return
+
+    attacker_id = pending_battles.pop(uid)
+
+    defender = characters[uid]
+
+    defender["health"] -= 5
+
+    await interaction.response.send_message(
+        f"💨 You fled the battle!\n"
+        f"You lose automatically but only take **5 damage**."
+    )
 # ----------------------- CHOOSE_SUFFIX COMMAND -----------------------
 @bot.tree.command(name="choose_suffix", description="Choose your warrior suffix")
 async def choose_suffix(interaction: discord.Interaction, suffix: str):
@@ -459,7 +491,6 @@ async def assign_mentor(interaction: discord.Interaction, mentee: discord.Member
     await interaction.response.send_message(
         f"🌟 **{mentor.display_name}** is now mentoring **{mentee.display_name}**!"
     )
-
 # ----------------------- SEASON COMMAND -----------------------
 @bot.tree.command(name="season", description="Check the current season")
 async def check_season(interaction: discord.Interaction):
