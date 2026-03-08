@@ -520,6 +520,16 @@ async def preypile(interaction: discord.Interaction):
 
     await interaction.response.send_message(
         f"🍖 **{clan}Clan's prey pile:** {prey_count} prey")
+    from datetime import datetime
+
+@tree.command(name="time", description="Check the current season and moon")
+async def time(interaction: discord.Interaction):
+    global season
+    # You can add moons later when you track them
+    await interaction.response.send_message(
+        f"🌿 The current season is **{season.capitalize()}**.\n"
+        f"🌓 Moons tracking will be added soon!"
+    )
     
 @tree.command(name="ping")
 async def ping(interaction: discord.Interaction):
