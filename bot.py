@@ -7,8 +7,8 @@ import random
 TOKEN = os.environ["TOKEN"]
 
 intents = discord.Intents.default()
+intents.members = True
 bot = commands.Bot(command_prefix="!", intents=intents)
-tree = bot.tree
 
 characters = {}
 
@@ -96,14 +96,10 @@ clan_specialties = {
 
 @bot.event
 async def on_ready():
-    try:
-        synced = await tree.sync()
-        print(f"Synced {len(synced)} commands")
-    except Exception as e:
-        print(e)
-
-    print(f"{bot.user} is online and ready!")
-
+    synced = await tree.sync(guild=YOUR_GUILD_ID)  # optional: sync only one guild to speed up testing
+    print(f"Synced {len(synced)} commands")
+    print(f"{bot.user} is online!")
+    
 @tree.command(name="kit", description="Create your kit")
 async def kit(interaction: discord.Interaction, prefix: str):
 
