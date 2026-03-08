@@ -96,7 +96,12 @@ clan_specialties = {
 
 @bot.event
 async def on_ready():
-    await tree.sync()
+    try:
+        synced = await tree.sync()
+        print(f"Synced {len(synced)} commands")
+    except Exception as e:
+        print(e)
+
     print(f"{bot.user} is online and ready!")
 
 @tree.command(name="kit", description="Create your kit")
