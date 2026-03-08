@@ -169,7 +169,6 @@ async def age(interaction: discord.Interaction, moons: int):
     await interaction.response.send_message(f"🌙 You are now **{moons_now} moons** old!")
 
 @tree.command(name="clan", description="Join a clan")
-@tree.command(name="clan", description="Join a clan")
 async def clan(interaction: discord.Interaction, clan_name: str):
 
     uid = interaction.user.id
