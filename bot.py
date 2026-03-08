@@ -84,16 +84,16 @@ async def kit(interaction: discord.Interaction, prefix: str):
 
     stats = generate_stats()
     characters[uid] = {
-        "prefix": prefix,
-        "rank": "kit",
-        "moons": 0,
-        "suffix": None,
-        "clan": None,
-        "health": 100,
-        "stats": stats,
-        "specialty": None,
-        "skill_value": 0
-    }
+    "prefix": prefix,
+    "rank": "kit",
+    "moons": 0,
+    "suffix": None,
+    "clan": None,
+    "health": 100,
+    "stats": stats,
+    "specialty": None,
+    "skill_value": 0,
+    "hunger": 50 }
 
     await interaction.response.send_message(
         f"🐾 **{prefix}kit** has been born into the Clan!\n\n"
@@ -238,7 +238,7 @@ async def hunt(interaction: discord.Interaction):
             f"Do you want to **eat it** or **add it to the fresh kill pile**?"
         )
 
-        pending_hunts = {}  # temporary storage for decisions
+pending_hunts = {}  # temporary storage for decisions
 
 @tree.command(name="eat", description="Eat the prey you just hunted")
 async def eat(interaction: discord.Interaction):
