@@ -19,7 +19,7 @@ clan_prey_piles = {
     "Wind": 0
 }
 
-season = "greenleaf"
+seasons = ["newleaf", "greenleaf", "leaf-fall", "leafbare"]
 
 prey_tables = {
 
@@ -285,6 +285,33 @@ async def stats(interaction: discord.Interaction):
         f"Clan Skill: {char['specialty']} ({char['skill_value']})"
     )
 
+@tree.command(name="set_season", description="Change the current season")
+@app_commands.checks.has_permissions(administrator=True)
+async def set_season(interaction: discord.Interaction, new_season: str):
+
+    global season
+
+    new_season = new_season.lower()
+
+    if new_season not in seasons:
+        await interaction.response.send_message(
+            "Valid seasons: newleaf, greenleaf, leaf-fall, leafbare"
+        )
+        return
+
+    season = new_season
+
+    await interaction.response.send_message(
+        f"🌿 The season has changed! It is now **{season}**."
+    )
+
+@tree.command(name="season", description="Check the current season")
+async def check_season(interaction: discord.Interaction):
+
+    await interaction.response.send_message(
+        f"🍃 The current season is **{season}**."
+    )
+    
 @tree.command(name="hunt", description="Go hunting for the clan")
 async def hunt(interaction: discord.Interaction):
 
@@ -470,26 +497,63 @@ async def make_warrior(interaction: discord.Interaction, member: discord.Member)
 
     await interaction.response.send_message(
         f"{member.mention} is now **{name}**, a warrior of the Clan! 🐾")
+    
+@tree.command(name="preypile", description="View your clan's prey pile")
+async def preypile(interaction: discord.Interaction):
 
+    uid = interaction.user.id
+
+    # Check if player has a character
+    if uid not in characters:
+        await interaction.response.send_message("You don't have a character yet! Use /kit to create one.")
+        return
+
+    char = characters[uid]
+
+    # Must belong to a clan
+    if not char["clan"]:
+        await interaction.response.send_message("You haven't joined a clan yet! Use /clan to join one.")
+        return
+
+    clan = char["clan"]
+    prey_count = clan_prey_piles.get(clan, 0)
+
+    await interaction.response.send_message(
+        f"🍖 **{clan}Clan's prey pile:** {prey_count} prey")
+    
 @tree.command(name="ping")
 async def ping(interaction: discord.Interaction):
     await interaction.response.send_message("ClanTracker is active! 🐾")
 
-@tree.command(name="help")
-async def help(interaction: discord.Interaction):
+@bot.tree.command(name="help", description="Shows all commands")
+async def help_command(interaction: discord.Interaction):
 
-    await interaction.response.send_message(
-        "**🐾 ClanTracker Commands**\n\n"
-        "/kit prefix — Create a character\n"
-        "/age moons — Age your cat\n"
-        "/stats — View character info\n"
-        "/clan name — Join a clan\n"
-        "/choose_suffix suffix — Pick warrior name\n\n"
-        "**Game Commands**\n"
-        "/hunt — Catch prey\n"
-        "/battle @user — Fight another cat\n\n"
-        "**Admin**\n"
-        "/make_apprentice @user\n"
-        "/make_warrior @user")
+    help_text = """
+🐾 **Warriors RPG Bot Commands**
+
+🌿 **Character**
+/create – Create your warrior
+/profile – View your character
+/age – Gain a moon
+/rank – Check your rank
+
+🍖 **Clan Life**
+/hunt – Hunt for prey
+/preypile – View clan prey pile
+/donate – Add prey to the pile
+
+⚔️ **Combat**
+/battle – Fight another warrior
+/train – Practice to improve skills
+
+🌎 **World**
+/season – Check the current season
+/time – Check the current moon
+
+📖 **Other**
+/help – Shows this command list
+"""
+
+    await interaction.response.send_message(help_text)
 
 bot.run(TOKEN)
