@@ -19,6 +19,13 @@ clan_prey_piles = {
     "Wind": 0
 }
 
+fresh_kill_piles = {
+    "Thunder": [],
+    "River": [],
+    "Shadow": [],
+    "Wind": []
+}
+
 seasons = ["newleaf", "greenleaf", "leaf-fall", "leafbare"]
 season = "greenleaf"  # default
 
@@ -189,47 +196,122 @@ async def profile(interaction: discord.Interaction):
     )
 
 # ----------------------- HUNT COMMAND -----------------------
-@bot.tree.command(name="hunt", description="Go hunting for the clan")
+@tree.command(name="hunt", description="Go hunting for the clan")
 async def hunt(interaction: discord.Interaction):
     uid = interaction.user.id
+
     if uid not in characters:
         await interaction.response.send_message("Create a character first with /kit.")
         return
 
     char = characters[uid]
+
     if char["rank"] == "kit":
         await interaction.response.send_message("Kits are too young to hunt!")
         return
+
     if not char["clan"]:
         await interaction.response.send_message("Join a clan first with /clan.")
         return
 
     stats = char["stats"]
-    hunt_skill = stats["perception"] + stats["dexterity"] + stats["luck"] + char["skill_value"]
+    hunt_skill = stats["perception"] + stats["dexterity"] + stats["luck"]
+    if char["specialty"]:
+        hunt_skill += char["skill_value"]
+
     roll = random.randint(1, 20)
     total = hunt_skill + roll
-
-    prey_pool = prey_tables[char["clan"]][season]
+    clan = char["clan"]
+    prey_pool = prey_tables[clan][season]
     intro = random.choice(hunt_messages)
 
     if total >= 20:
         prey = random.choice(list(prey_pool.keys()))
         value = prey_pool[prey]
-        clan_prey_piles[char["clan"]] += value
+
+        # Prompt the player: eat or add to fresh kill pile
         await interaction.response.send_message(
             f"{intro}\n\n"
             f"🎯 Hunting roll: **{roll}**\n"
             f"Skill bonus: **{hunt_skill}**\n\n"
             f"🐾 You caught a **{prey}**!\n"
-            f"🍖 It adds **{value} prey** to the clan pile.\n"
-            f"Clan prey pile: **{clan_prey_piles[char['clan']]}**"
+            f"Do you want to **eat it** or **add it to the fresh kill pile**?"
         )
+
+        pending_hunts = {}  # temporary storage for decisions
+
+@tree.command(name="eat", description="Eat the prey you just hunted")
+async def eat(interaction: discord.Interaction):
+    uid = interaction.user.id
+    if uid not in pending_hunts:
+        await interaction.response.send_message("You have no prey waiting. Go hunt first!")
+        return
+
+    char = characters[uid]
+    prey_info = pending_hunts.pop(uid)
+
+    # Eating reduces hunger
+    char["hunger"] = min(char["hunger"] + 50, 100)
+
+    await interaction.response.send_message(
+        f"🍖 You ate the **{prey_info['prey']}**!\n"
+        f"Your hunger is now **{char['hunger']}**"
+    )
+
+@tree.command(name="donate", description="Add your hunted prey to the clan's fresh kill pile")
+async def donate(interaction: discord.Interaction):
+    uid = interaction.user.id
+    if uid not in pending_hunts:
+        await interaction.response.send_message("You have no prey waiting. Go hunt first!")
+        return
+
+    prey_info = pending_hunts.pop(uid)
+    fresh_kill_piles[prey_info["clan"]].append(prey_info["prey"])
+    clan_prey_piles[prey_info["clan"]] += prey_info["value"]
+
+    await interaction.response.send_message(
+        f"🐾 You added **{prey_info['prey']}** to the fresh kill pile of **{prey_info['clan']}Clan**!"
+    )
+
+@tree.command(name="preypile", description="View your clan's prey pile")
+async def preypile(interaction: discord.Interaction):
+    uid = interaction.user.id
+    if uid not in characters:
+        await interaction.response.send_message("You don't have a character yet! Use /kit.")
+        return
+
+    char = characters[uid]
+
+    if not char["clan"]:
+        await interaction.response.send_message("You haven't joined a clan yet! Use /clan to join one.")
+        return
+
+    clan = char["clan"]
+    total_prey = clan_prey_piles.get(clan, 0)
+    fresh = ", ".join(fresh_kill_piles[clan]) if fresh_kill_piles[clan] else "None"
+
+    await interaction.response.send_message(
+        f"🍖 **{clan}Clan's total prey:** {total_prey}\n"
+        f"🪶 **Fresh kill pile:** {fresh}"
+    )
+
+        # Save the context somewhere, e.g. in a temp dict
+        pending_hunts[uid] = {
+            "prey": prey,
+            "value": value,
+            "clan": clan
+        }
+
     else:
+        # Reduce hunger for effort
+        char["hunger"] = max(char["hunger"] - 10, 0)
+
         await interaction.response.send_message(
             f"{intro}\n\n"
             f"🎯 Hunting roll: **{roll}**\n"
             f"Skill bonus: **{hunt_skill}**\n\n"
-            "💨 The prey escapes!"
+            f"💨 The prey escapes!\n"
+            f"🍽️ Your hunger is now **{char['hunger']}**"
         )
 
 # ----------------------- BATTLE COMMAND -----------------------
@@ -328,11 +410,66 @@ async def choose_suffix(interaction: discord.Interaction, suffix: str):
     await interaction.response.send_message(
         f"Your future warrior name will be **{char['prefix']}{suffix}**."
     )
+    
+@bot.tree.command(name="assign_mentor", description="Assign a mentor to an apprentice")
+async def assign_mentor(interaction: discord.Interaction, mentee: discord.Member, mentor: discord.Member):
+    mentee_id = mentee.id
+    mentor_id = mentor.id
+
+    # Check if characters exist
+    if mentee_id not in characters:
+        await interaction.response.send_message("The mentee has no character.")
+        return
+    if mentor_id not in characters:
+        await interaction.response.send_message("The mentor has no character.")
+        return
+
+    mentee_char = characters[mentee_id]
+    mentor_char = characters[mentor_id]
+
+    # Rank restrictions
+    if mentee_char["rank"] != "apprentice":
+        await interaction.response.send_message("Only apprentices can be assigned a mentor.")
+        return
+    if mentor_char["rank"] != "warrior":
+        await interaction.response.send_message("Only warriors can be mentors.")
+        return
+
+    # Permission check: must be admin or the mentor themselves
+    if interaction.user.id != mentor_id and not interaction.user.guild_permissions.administrator:
+        await interaction.response.send_message("Only an administrator or the chosen mentor can assign this mentorship.")
+        return
+
+    # Cannot mentor self
+    if mentee_id == mentor_id:
+        await interaction.response.send_message("You cannot mentor yourself!")
+        return
+
+    # Assign mentor
+    mentee_char["mentor"] = mentor_id
+    await interaction.response.send_message(
+        f"🌟 **{mentor.display_name}** is now mentoring **{mentee.display_name}**!"
+    )
 
 # ----------------------- SEASON COMMAND -----------------------
 @bot.tree.command(name="season", description="Check the current season")
 async def check_season(interaction: discord.Interaction):
     await interaction.response.send_message(f"🍃 The current season is **{season}**.")
+
+@bot.tree.command(name="set_season", description="Change the current season (admin only)")
+@app_commands.checks.has_permissions(administrator=True)
+async def set_season(interaction: discord.Interaction, new_season: str):
+    global season  # update the global season variable
+
+    new_season = new_season.lower()
+    if new_season not in ["newleaf", "greenleaf", "leaf-fall", "leafbare"]:
+        await interaction.response.send_message(
+            "❌ Invalid season! Valid seasons are: newleaf, greenleaf, leaf-fall, leafbare."
+        )
+        return
+
+    season = new_season
+    await interaction.response.send_message(f"🌿 The season has been changed! It is now **{season.capitalize()}**.")
 
 # ----------------------- PING COMMAND -----------------------
 @bot.tree.command(name="ping", description="Check if the bot is active")
