@@ -11,6 +11,7 @@ intents.members = True
 bot = commands.Bot(command_prefix="!", intents=intents)
 
 characters = {}
+pending_hunts = {}
 
 clan_prey_piles = {
     "Thunder": 0,
@@ -256,9 +257,7 @@ async def hunt(interaction: discord.Interaction):
             f"🍽️ Your hunger is now **{char['hunger']}**"
         )
 
-pending_hunts = {}  # temporary storage for decisions
-
-@tree.command(name="eat", description="Eat the prey you just hunted")
+@bot.tree.command(name="eat", description="Eat the prey you just hunted")
 async def eat(interaction: discord.Interaction):
     uid = interaction.user.id
     if uid not in pending_hunts:
@@ -276,7 +275,7 @@ async def eat(interaction: discord.Interaction):
         f"Your hunger is now **{char['hunger']}**"
     )
 
-@tree.command(name="donate", description="Add your hunted prey to the clan's fresh kill pile")
+@bot.tree.command(name="donate", description="Add your hunted prey to the clan's fresh kill pile")
 async def donate(interaction: discord.Interaction):
     uid = interaction.user.id
     if uid not in pending_hunts:
@@ -291,46 +290,38 @@ async def donate(interaction: discord.Interaction):
         f"🐾 You added **{prey_info['prey']}** to the fresh kill pile of **{prey_info['clan']}Clan**!"
     )
 
-@tree.command(name="preypile", description="View your clan's prey pile")
+@bot.tree.command(name="preypile", description="View your clan's prey pile")
 async def preypile(interaction: discord.Interaction):
     uid = interaction.user.id
+
     if uid not in characters:
-        await interaction.response.send_message("You don't have a character yet! Use /kit.")
+        await interaction.response.send_message(
+            "You don't have a character yet! Use /kit."
+        )
         return
 
     char = characters[uid]
 
     if not char["clan"]:
-        await interaction.response.send_message("You haven't joined a clan yet! Use /clan to join one.")
+        await interaction.response.send_message(
+            "You haven't joined a clan yet! Use /clan to join one."
+        )
         return
 
     clan = char["clan"]
     total_prey = clan_prey_piles.get(clan, 0)
-    fresh = ", ".join(fresh_kill_piles[clan]) if fresh_kill_piles[clan] else "None"
+
+    # Show fresh kill list
+    if fresh_kill_piles[clan]:
+        fresh = ", ".join(fresh_kill_piles[clan])
+    else:
+        fresh = "None"
 
     await interaction.response.send_message(
-        f"🍖 **{clan}Clan's total prey:** {total_prey}\n"
-        f"🪶 **Fresh kill pile:** {fresh}"
+        f"🍖 **{clan}Clan Prey Report**\n\n"
+        f"Total prey stored: **{total_prey}**\n"
+        f"Fresh kill pile: **{fresh}**"
     )
-
-        # Save the context somewhere, e.g. in a temp dict
-        pending_hunts[uid] = {
-            "prey": prey,
-            "value": value,
-            "clan": clan
-        }
-
-    else:
-        # Reduce hunger for effort
-        char["hunger"] = max(char["hunger"] - 10, 0)
-
-        await interaction.response.send_message(
-            f"{intro}\n\n"
-            f"🎯 Hunting roll: **{roll}**\n"
-            f"Skill bonus: **{hunt_skill}**\n\n"
-            f"💨 The prey escapes!\n"
-            f"🍽️ Your hunger is now **{char['hunger']}**"
-        )
 
 # ----------------------- BATTLE COMMAND -----------------------
 @bot.tree.command(name="battle", description="Challenge another cat")
