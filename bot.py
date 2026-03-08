@@ -197,7 +197,6 @@ async def profile(interaction: discord.Interaction):
 
 # ----------------------- HUNT COMMAND -----------------------
 @bot.tree.command(name="hunt", description="Go hunting for the clan")
-@bot.tree.command(name="hunt", description="Go hunting for the clan")
 async def hunt(interaction: discord.Interaction):
     uid = interaction.user.id
 
