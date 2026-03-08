@@ -96,13 +96,9 @@ clan_specialties = {
 
 @bot.event
 async def on_ready():
-    synced = await tree.sync(guild=YOUR_GUILD_ID)  # optional: sync only one guild to speed up testing
-    print(f"Synced {len(synced)} commands")
+    synced = await bot.tree.sync()  # global commands
+    print(f"Synced {len(synced)} commands globally")
     print(f"{bot.user} is online!")
-    
-@tree.command(name="kit", description="Create your kit")
-async def kit(interaction: discord.Interaction, prefix: str):
-
     if interaction.user.id in characters:
         await interaction.response.send_message("You already have a character.")
         return
