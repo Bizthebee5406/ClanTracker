@@ -94,15 +94,6 @@ clan_specialties = {
     "Shadow": "stealth",
     "Wind": "endurance"}
 
-@bot.event
-async def on_ready():
-    synced = await bot.tree.sync()  # global commands
-    print(f"Synced {len(synced)} commands globally")
-    print(f"{bot.user} is online!")
-    if interaction.user.id in characters:
-        await interaction.response.send_message("You already have a character.")
-        return
-
     stats = {
         "strength": random.randint(0,10),
         "perception": random.randint(0,10),
@@ -134,7 +125,54 @@ async def on_ready():
         f"Speed: {stats['speed']}\n"
         f"Intelligence: {stats['intelligence']}\n"
         f"Luck: {stats['luck']}\n"
-        f"Charisma: {stats['charisma']}")
+        f"Charisma: {stats['charisma']}")@bot.event
+async def on_ready():
+    synced = await bot.tree.sync()  # global commands
+    print(f"Synced {len(synced)} commands globally")
+    print(f"{bot.user} is online!")
+
+@bot.tree.command(name="kit", description="Create your kit")
+async def kit(interaction: discord.Interaction, prefix: str):
+    uid = interaction.user.id
+
+    if uid in characters:
+        await interaction.response.send_message("You already have a character.")
+        return
+
+    # Generate random stats
+    stats = {
+        "strength": random.randint(0, 10),
+        "perception": random.randint(0, 10),
+        "dexterity": random.randint(0, 10),
+        "speed": random.randint(0, 10),
+        "intelligence": random.randint(0, 10),
+        "luck": random.randint(0, 10),
+        "charisma": random.randint(0, 10)
+    }
+
+    characters[uid] = {
+        "prefix": prefix,
+        "rank": "kit",
+        "moons": 0,
+        "suffix": None,
+        "clan": None,
+        "health": 100,
+        "stats": stats,
+        "specialty": None,
+        "skill_value": 0
+    }
+
+    await interaction.response.send_message(
+        f"🐾 **{prefix}kit** has been born into the Clan!\n\n"
+        f"**Base Stats**\n"
+        f"Strength: {stats['strength']}\n"
+        f"Perception: {stats['perception']}\n"
+        f"Dexterity: {stats['dexterity']}\n"
+        f"Speed: {stats['speed']}\n"
+        f"Intelligence: {stats['intelligence']}\n"
+        f"Luck: {stats['luck']}\n"
+        f"Charisma: {stats['charisma']}"
+    )
     
 @tree.command(name="age", description="Age your character")
 async def age(interaction: discord.Interaction, moons: int):
