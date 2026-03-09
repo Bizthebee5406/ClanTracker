@@ -597,28 +597,80 @@ async def take_prey(interaction: discord.Interaction):
         f"🏕 Camp quality slightly decreased: **{camp_quality[clan]}**"
     )
 # ----------------------- PROFILE -----------------------
+import discord
+
 @bot.tree.command(name="profile", description="View your character profile")
 async def profile(interaction: discord.Interaction):
     uid = interaction.user.id
     char = characters.get(uid)
+
     if not char:
-        await interaction.response.send_message("❌ You don't have a character yet.")
+        await interaction.response.send_message("❌ You don't have a character yet. Use /kit.")
         return
 
-    hunger_msg = hunger_status(char["hunger"])
-    health_msg = health_status(char["health"])
-    preg_msg = ""
-    if char.get("pregnant"):
-        months = char["pregnant"]["months"]
-        preg_msg = f"🌱 Pregnant, Month {months+1}/5, Carrier: {char['pregnant']['carrier']}"
+    name = f"{char['prefix']}{char.get('suffix','')}"
+    rank = char.get("rank", "unknown")
+    clan = char.get("clan", "None")
+    moons = char.get("moons", 0)
+    hunger = char.get("hunger", 0)
+    alive = char.get("alive", True)
 
-    embed = discord.Embed(title=f"{char['prefix']}'s Profile", color=discord.Color.green())
-    embed.add_field(name="Clan", value=char.get("clan", "None"), inline=True)
-    embed.add_field(name="Age", value=f"{char.get('moons',0)} moons", inline=True)
-    embed.add_field(name="Health ❤️", value=f"{char['health']}/100\n{health_msg}", inline=False)
-    embed.add_field(name="Hunger 🍖", value=f"{char['hunger']}/100\n{hunger_msg}", inline=False)
-    if preg_msg:
-        embed.add_field(name="Pregnancy", value=preg_msg, inline=False)
+    status = "Alive 🐾" if alive else "Dead 💀"
+
+    stats = char.get("stats", {})
+
+    strength = stats.get("strength", 0)
+    agility = stats.get("agility", 0)
+    intelligence = stats.get("intelligence", 0)
+    stealth = stats.get("stealth", 0)
+    perception = stats.get("perception", 0)
+
+    mentor = char.get("mentor", "None")
+    apprentice = char.get("apprentice", "None")
+    mate = char.get("mate", "None")
+    kits = char.get("kits", [])
+
+    if isinstance(kits, list):
+        kits = ", ".join(kits) if kits else "None"
+
+    embed = discord.Embed(
+        title=f"🐾 {name}",
+        description=f"{rank.title()} of **{clan}Clan**",
+        color=discord.Color.green()
+    )
+
+    embed.add_field(
+        name="Basic Info",
+        value=(
+            f"Age: **{moons} moons**\n"
+            f"Hunger: **{hunger}/100**\n"
+            f"Status: **{status}**"
+        ),
+        inline=False
+    )
+
+    embed.add_field(
+        name="📊 Stats",
+        value=(
+            f"Strength: **{strength}**\n"
+            f"Agility: **{agility}**\n"
+            f"Intelligence: **{intelligence}**\n"
+            f"Stealth: **{stealth}**\n"
+            f"Perception: **{perception}**"
+        ),
+        inline=False
+    )
+
+    embed.add_field(
+        name="Relationships",
+        value=(
+            f"Mentor: **{mentor}**\n"
+            f"Apprentice: **{apprentice}**\n"
+            f"Mate: **{mate}**\n"
+            f"Kits: **{kits}**"
+        ),
+        inline=False
+    )
 
     await interaction.response.send_message(embed=embed)
 # ----------------------- CLAN COMMAND -----------------------
