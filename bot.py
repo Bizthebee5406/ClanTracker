@@ -246,38 +246,54 @@ async def clan(interaction: discord.Interaction, clan_name: str):
     )
 
 # ----------------------- PROFILE COMMAND -----------------------
-@bot.tree.command(name="profile", description="View your full character profile")
+@bot.tree.command(name="profile", description="View your character profile")
 async def profile(interaction: discord.Interaction):
+
     uid = interaction.user.id
-    if uid not in characters:
-        await interaction.response.send_message("You don't have a character yet! Use /kit.")
+    char = characters.get(uid)
+
+    if not char:
+        await interaction.response.send_message(
+            "❌ You don't have a character yet."
+        )
         return
 
-    char = characters[uid]
-    stats = char["stats"]
-    if char["rank"] == "kit":
-        display_name = f"{char['prefix']}kit"
-    elif char["rank"] == "apprentice":
-        display_name = f"{char['prefix']}paw"
-    elif char["rank"] == "warrior":
-        display_name = f"{char['prefix']}{char['suffix']}"
-    else:
-        display_name = char["prefix"]
+    hunger = char["hunger"]
+    health = char["health"]
 
-    clan = char["clan"] or "None"
-    specialty = f"{char['specialty']} ({char['skill_value']})" if char["specialty"] else "None"
-    prey_contribution = clan_prey_piles.get(char["clan"], 0) if char["clan"] else 0
+    hunger_msg = hunger_status(hunger)
+    health_msg = health_status(health)
 
-    await interaction.response.send_message(
-        f"📖 **{display_name}**'s Profile\n\n"
-        f"**Rank:** {char['rank']}\n"
-        f"**Age:** {char['moons']} moons\n"
-        f"**Clan:** {clan}\n"
-        f"**Clan Skill:** {specialty}\n"
-        f"**Prey Contributed:** {prey_contribution}\n\n" +
-        "\n".join(f"**{k.capitalize()}:** {v}" for k,v in stats.items())
+    embed = discord.Embed(
+        title=f"{char['prefix']}'s Profile",
+        color=discord.Color.green()
     )
 
+    embed.add_field(
+        name="Clan",
+        value=char["clan"],
+        inline=True
+    )
+
+    embed.add_field(
+        name="Age",
+        value=f"{char['age']} moons",
+        inline=True
+    )
+
+    embed.add_field(
+        name="Health ❤️",
+        value=f"{health}/100\n{health_msg}",
+        inline=False
+    )
+
+    embed.add_field(
+        name="Hunger 🍖",
+        value=f"{hunger}/100\n{hunger_msg}",
+        inline=False
+    )
+
+    await interaction.response.send_message(embed=embed)
 # ----------------------- HUNT COMMAND -----------------------
 def hunting_outcome(char, base_success=70):
     """
@@ -660,7 +676,6 @@ async def execute_move(interaction, attacker_id, defender_id, move):
 
     await prompt_turn(interaction, attacker_id, defender_id)
 # ----------------- Camp Maintenance -----------------
-#
 @bot.tree.command(name="maintain_camp", description="Help maintain the camp")
 async def maintain_camp(interaction: discord.Interaction):
 
@@ -713,6 +728,57 @@ async def camp_decay(interaction: discord.Interaction):
 
     await interaction.response.send_message(
         "🌧️ Weather and time have worn down the camps. Camp quality decreased."
+    )
+
+@bot.tree.command(name="see_medicine_cat", description="Visit the medicine cat to heal your wounds.")
+async def see_medicine_cat(interaction: discord.Interaction):
+
+    uid = interaction.user.id
+
+    if in_battle(uid):
+        await interaction.response.send_message(
+            "⚔️ You cannot visit the medicine cat during a battle!",
+            ephemeral=True
+        )
+        return
+
+    char = characters.get(uid)
+
+    if not char:
+        await interaction.response.send_message(
+            "❌ You don't have a character yet."
+        )
+        return
+
+    if char["health"] >= 100:
+        await interaction.response.send_message(
+            "💪 You are already perfectly healthy."
+        )
+        return
+
+    heal = random.randint(10, 35)
+
+    old_health = char["health"]
+    char["health"] = min(100, char["health"] + heal)
+
+    actual_heal = char["health"] - old_health
+
+    camp["quality"] = max(0, camp["quality"] - 2)
+
+    messages = [
+        "🌿 The medicine cat applies herbs to your wounds.",
+        "🍃 A bitter herbal paste is pressed onto your injuries.",
+        "🌱 You rest while the medicine cat tends to your wounds.",
+        "🌿 The medicine cat wraps your wounds in healing herbs."
+    ]
+
+    msg = random.choice(messages)
+
+    await interaction.response.send_message(
+        f"{msg}\n\n"
+        f"❤️ You recovered **{actual_heal} health!**\n"
+        f"Current Health: **{char['health']}/100**\n\n"
+        f"🏕 Camp quality decreased slightly."
     )
 # ----------------------- TRAIN COMMAND -----------------------
 @bot.tree.command(name="train", description="Train to improve your skills.")
