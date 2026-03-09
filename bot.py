@@ -137,27 +137,33 @@ async def kit(interaction: discord.Interaction, prefix: str):
     )
 
 # ----------------------- AGE COMMAND -----------------------
-@bot.tree.command(name="age", description="Age your character")
-async def age(interaction: discord.Interaction, moons: int):
-    uid = interaction.user.id
-    if uid not in characters:
-        await interaction.response.send_message("You don't have a character yet. Use /kit.")
+@bot.tree.command(name="age", description="Age your character by one moon.")
+async def age(interaction: discord.Interaction):
+    user_id = interaction.user.id
+    char = characters.get(user_id)
+
+    if not char or not char.get("alive", True):
+        await interaction.response.send_message("❌ You don't have a living character.")
         return
 
-    characters[uid]["moons"] += moons
-    moons_now = characters[uid]["moons"]
+    hunger_cost = -10
+    msg = modify_hunger(char, hunger_cost)
 
-    if characters[uid]["rank"] == "kit" and moons_now >= 6:
-        characters[uid]["rank"] = "apprentice"
-        name = f"{characters[uid]['prefix']}paw"
-        await interaction.response.send_message(
-            f"🌙 You are now {moons_now} moons old!\n"
-            f"You have become **{name}**, an apprentice! 🐾"
-        )
+    if msg and not char.get("alive", True):
+        await interaction.response.send_message(msg)
         return
 
-    await interaction.response.send_message(f"🌙 You are now **{moons_now} moons** old!")
+    char["age"] = char.get("age", 0) + 1
+    char["training_sessions"] = 0
+    char["exhaustion"] = 0
 
+    await interaction.response.send_message(
+        f"🌙 {char['prefix']} ages one moon.\n"
+        f"Age: {char['age']} moons\n"
+        f"Hunger -10\n"
+        f"{msg or ''}"
+    )
+    
 @bot.tree.command(name="make_warrior", description="Promote an apprentice to warrior")
 @app_commands.checks.has_permissions(administrator=True)
 async def make_warrior(interaction: discord.Interaction, member: discord.Member):
@@ -273,65 +279,51 @@ async def profile(interaction: discord.Interaction):
     )
 
 # ----------------------- HUNT COMMAND -----------------------
-@bot.tree.command(name="hunt", description="Go hunting for the clan")
-async def hunt(interaction: discord.Interaction):
-    uid = interaction.user.id
+def hunting_outcome(char, base_success=70):
+    """
+    Determines the success of a hunt based on hunger.
+    Returns: success (bool), food_gained (int)
+    """
+    hunger = char["hunger"]
+    success_chance = base_success
 
-    if uid not in characters:
-        await interaction.response.send_message("Create a character first with /kit.")
-        return
+    # Modify success based on hunger
+    if hunger <= 0:
+        success_chance -= 40  # almost impossible to hunt
+    elif hunger < 20:
+        success_chance -= 20  # weak, less accurate
+    elif hunger < 40:
+        success_chance -= 10
+    elif hunger < 70:
+        pass  # normal
+    elif hunger < 90:
+        success_chance += 5  # slightly stronger, energetic
+    elif hunger <= 100:
+        success_chance -= 15  # overstuffed: too slow or heavy
 
-    char = characters[uid]
+    # Random outcome
+    roll = random.randint(1, 100)
+    success = roll <= success_chance
 
-    if not char["clan"]:
-        await interaction.response.send_message("Join a clan first with /clan.")
-        return
+    # Food gained is reduced if starving, increased if well-fed
+    food_gained = random.randint(5, 15)
+    if hunger < 20:
+        food_gained = max(1, food_gained - 5)
+    elif hunger < 40:
+        food_gained = max(3, food_gained - 2)
+    elif hunger >= 70 and hunger < 90:
+        food_gained += 2
+    elif hunger >= 90:
+        food_gained = max(1, food_gained - 3)  # overstuffed, inefficient
 
-    stats = char["stats"]
-    hunt_skill = stats["perception"] + stats["dexterity"] + stats["luck"]
-    if char["specialty"]:
-        hunt_skill += char["skill_value"]
+    # Reduce hunger for effort
+    hunger_cost = 5
+    if char.get("hunt_streak", 0) > 3:
+        hunger_cost += 3  # extra hunger if overused
 
-    roll = random.randint(1, 20)
-    hunger_mod = hunger_modifier_hunt(char["hunger"])
-    total = hunt_skill + roll + hunger_mod
-    clan = char["clan"]
-    prey_pool = prey_tables[clan][season]
-    intro = random.choice(hunt_messages)
+    char["hunger"] = max(char["hunger"] - hunger_cost, 0)
 
-    # Message about hunger
-    if hunger_mod > 0:
-        hunger_msg = "You feel energetic and focused. (+{0} bonus)".format(hunger_mod)
-    elif hunger_mod < 0:
-        hunger_msg = "You feel weak or sluggish. ({0} penalty)".format(hunger_mod)
-    else:
-        hunger_msg = ""
-
-    if total >= 20:
-        prey = random.choice(list(prey_pool.keys()))
-        value = prey_pool[prey]
-
-        # Save prey info for eat/donate
-        pending_hunts[uid] = {
-            "prey": prey,
-            "value": value,
-            "clan": clan
-        }
-
-        await interaction.response.send_message(
-            f"{intro}\n{hunger_msg}\n\n"
-            f"🎯 Hunting roll: **{roll}** + skill {hunt_skill} = **{total}**\n\n"
-            f"🐾 You caught a **{prey}**!\n"
-            f"Do you want to **eat it** or **add it to the fresh kill pile**? Use /eat or /donate."
-        )
-    else:
-        char["hunger"] = max(char["hunger"] - 10, 0)
-        await interaction.response.send_message(
-            f"{intro}\n{hunger_msg}\n\n"
-            f"🎯 Hunting roll: **{roll}** + skill {hunt_skill} = **{total}**\n"
-            f"💨 The prey escapes!\n"
-            f"🍽️ Your hunger is now **{char['hunger']}**"
-        )
+    return success, food_gained
 
 @bot.tree.command(name="eat", description="Eat the prey you just hunted")
 async def eat(interaction: discord.Interaction):
@@ -808,33 +800,45 @@ async def camp_decay(interaction: discord.Interaction):
         "🌧️ Weather and time have worn down the camps. Camp quality decreased."
     )
 # ----------------------- TRAIN COMMAND -----------------------
-@bot.tree.command(name="train", description="Train a stat to improve your abilities")
-async def train(interaction: discord.Interaction, stat: str):
-    uid = interaction.user.id
-    if uid not in characters:
-        await interaction.response.send_message("You don't have a character yet! Use /kit.")
+@bot.tree.command(name="train", description="Train to improve your skills.")
+@bot.tree.command(name="train", description="Train your character to improve stats.")
+async def train(interaction: discord.Interaction):
+    user_id = interaction.user.id
+    char = characters.get(user_id)
+
+    if not char or not char.get("alive", True):
+        await interaction.response.send_message("❌ You don't have a living character.")
         return
 
-    char = characters[uid]
-    if char["rank"] == "kit":
-        await interaction.response.send_message("Kits are too young to train!")
+    max_sessions = 3
+    base_hunger_cost = -5
+
+    # Calculate hunger cost multiplier for repeated training
+    sessions_this_moon = char.get("training_sessions", 0)
+    hunger_cost = base_hunger_cost * (1 + sessions_this_moon)  # more training = more hunger
+
+    msg = modify_hunger(char, hunger_cost)
+    if msg and not char.get("alive", True):
+        await interaction.response.send_message(msg)
         return
 
-    stat = stat.lower()
-    if stat not in char["stats"]:
-        await interaction.response.send_message(
-            "Invalid stat! Choose from strength, perception, dexterity, speed, intelligence, luck, charisma."
-        )
+    # Exhaustion logic
+    char["training_sessions"] = sessions_this_moon + 1
+    if char["training_sessions"] > max_sessions:
+        char["exhaustion"] = char.get("exhaustion", 0) + 1
+
+    if char.get("exhaustion", 0) > 5:
+        await interaction.response.send_message(f"💤 {char['prefix']} is too exhausted to train further this moon!")
         return
 
-    gain = random.randint(1, 3)
-    if char["specialty"] and stat == char["specialty"]:
-        gain += 1
+    # Apply stat gains (example)
+    char["strength"] = char.get("strength", 10) + 1
 
-    char["stats"][stat] += gain
     await interaction.response.send_message(
-        f"💪 {char['prefix']} trained **{stat.capitalize()}** and gained **{gain}** points!\n"
-        f"New {stat.capitalize()}: **{char['stats'][stat]}**"
+        f"💪 {char['prefix']} trains and gains +1 strength!\n"
+        f"Hunger: {char['hunger']}\n"
+        f"Exhaustion: {char.get('exhaustion',0)}\n"
+        f"{msg or ''}"
     )
 # ----------------------- CHOOSE_SUFFIX COMMAND -----------------------
 @bot.tree.command(name="choose_suffix", description="Choose your warrior suffix")
