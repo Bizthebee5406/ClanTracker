@@ -14,7 +14,6 @@ characters = {}
 # ----------------------- GLOBALS -----------------------
 pending_hunts = {}  # stores prey for eat/donate
 pending_battles = {}  # stores pending battle invitations
-camp_quality = 50  # 0=terrible, 100=perfect
 
 # ----------------------- HUNGER MODIFIERS -----------------------
 def hunger_modifier_hunt(hunger):
@@ -425,20 +424,20 @@ async def take_prey(interaction: discord.Interaction):
         f"🍖 You take a **{prey}** from the fresh kill pile and eat it.\n"
         f"Your hunger is now **{char['hunger']}**."
     )
-# ----------------------- BATTLE COMMAND -----------------------
+#from discord.ui import View, Button
 
-from discord.ui import View, Button
-
-# ----------------------- BATTLE COMMAND WITH BUTTONS -----------------------
+# ----------------------- FULL BATTLE COMMAND -----------------------
 @bot.tree.command(name="battle", description="Challenge another cat")
 async def battle(interaction: discord.Interaction, opponent: discord.Member):
     uid = interaction.user.id
     oid = opponent.id
 
+    # Must have characters
     if uid not in characters or oid not in characters:
-        await interaction.response.send_message("Both players must have a character to battle!")
+        await interaction.response.send_message("Both cats must have a character to battle!")
         return
 
+    # Opponent cannot already have a pending battle
     if oid in pending_battles:
         await interaction.response.send_message("That cat already has a pending battle!")
         return
@@ -450,16 +449,16 @@ async def battle(interaction: discord.Interaction, opponent: discord.Member):
         view = View()
 
         async def confirm_callback(interact: discord.Interaction):
-            await start_battle(interaction, opponent)
             for item in view.children:
                 item.disabled = True
             await interact.message.edit(view=view)
+            await start_battle(interact, opponent)
 
         async def cancel_callback(interact: discord.Interaction):
-            await interact.response.send_message("⚠️ Battle cancelled due to hunger.", ephemeral=True)
             for item in view.children:
                 item.disabled = True
             await interact.message.edit(view=view)
+            await interact.response.send_message("⚠️ Battle cancelled due to hunger.", ephemeral=True)
 
         yes_btn = Button(label="Yes", style=discord.ButtonStyle.green)
         yes_btn.callback = confirm_callback
@@ -470,7 +469,7 @@ async def battle(interaction: discord.Interaction, opponent: discord.Member):
         view.add_item(no_btn)
 
         await interaction.response.send_message(
-            "⚠️ You are too hungry to fight! Your hunger is low. Proceed with battle?",
+            "⚠️ You are too hungry to fight! Your hunger is very low. Proceed with battle?",
             view=view
         )
         return
@@ -483,27 +482,49 @@ async def start_battle(interaction: discord.Interaction, opponent: discord.Membe
     uid = interaction.user.id
     oid = opponent.id
 
-    # Save battle invitation
     pending_battles[oid] = {"attacker": uid, "opponent": oid}
 
-    await interaction.followup.send(
+    view = View()
+
+    async def fight_callback(interact: discord.Interaction):
+        await resolve_battle(interact, uid, oid)
+        for item in view.children:
+            item.disabled = True
+        await interact.message.edit(view=view)
+
+    async def flee_callback(interact: discord.Interaction):
+        defender = characters[oid]
+        flee_damage = 5
+        defender["health"] = max(defender["health"] - flee_damage, 0)
+        pending_battles.pop(oid, None)
+        await interact.response.send_message(
+            f"💨 **{defender['prefix']}** flees from battle!\n"
+            f"They take **{flee_damage} damage** but avoid full combat.\n"
+            f"💖 HP now: {defender['health']}"
+        )
+        for item in view.children:
+            item.disabled = True
+        await interact.message.edit(view=view)
+
+    fight_btn = Button(label="Fight", style=discord.ButtonStyle.green)
+    fight_btn.callback = fight_callback
+    flee_btn = Button(label="Flee", style=discord.ButtonStyle.red)
+    flee_btn.callback = flee_callback
+
+    view.add_item(fight_btn)
+    view.add_item(flee_btn)
+
+    await interaction.response.send_message(
         f"⚔️ **{characters[uid]['prefix']}** has challenged **{opponent.display_name}**!\n"
-        f"{opponent.mention}, do you accept? Use `/fight` to fight or `/flee` to flee."
+        f"{opponent.mention}, do you accept?",
+        view=view
     )
 
-# ----------------------- FIGHT COMMAND -----------------------
-@bot.tree.command(name="fight", description="Accept a pending battle")
-async def fight(interaction: discord.Interaction):
-    uid = interaction.user.id
-    if uid not in pending_battles:
-        await interaction.response.send_message("You have no battle invitations!")
-        return
+# ----------------------- RESOLVE BATTLE FUNCTION -----------------------
+async def resolve_battle(interact: discord.Interaction, attacker_id: int, defender_id: int):
+    attacker = characters[attacker_id]
+    defender = characters[defender_id]
 
-    info = pending_battles.pop(uid)
-    attacker = characters[info["attacker"]]
-    defender = characters[info["opponent"]]
-
-    # Rolls
     atk_stats = attacker["stats"]
     def_stats = defender["stats"]
 
@@ -513,7 +534,6 @@ async def fight(interaction: discord.Interaction):
     atk_total = atk_stats["strength"] + atk_stats["speed"] + atk_stats["dexterity"] + atk_stats["luck"] + atk_roll
     def_total = def_stats["strength"] + def_stats["speed"] + def_stats["dexterity"] + def_stats["intelligence"] + def_roll
 
-    # Hunger modifiers
     atk_total += hunger_modifier_battle(attacker["hunger"])
     def_total += hunger_modifier_battle(defender["hunger"])
 
@@ -536,7 +556,7 @@ async def fight(interaction: discord.Interaction):
     attacker_name = full_name(attacker)
     defender_name = full_name(defender)
 
-    # Determine result and apply damage
+    # Determine result
     if atk_total > def_total:
         result = f"⚔️ **{attacker_name}** wins the battle!"
         defender["health"] = max(defender["health"] - 20, 0)
@@ -546,7 +566,10 @@ async def fight(interaction: discord.Interaction):
     else:
         result = "⚔️ The battle ends in a draw!"
 
-    await interaction.response.send_message(
+    # Remove pending battle
+    pending_battles.pop(defender_id, None)
+
+    await interact.response.send_message(
         f"🐾 Battle Begins!\n\n"
         f"{attacker_name} roll: **{atk_roll}** + stats = **{atk_total}**\n"
         f"{defender_name} roll: **{def_roll}** + stats = **{def_total}**\n\n"
@@ -554,32 +577,6 @@ async def fight(interaction: discord.Interaction):
         f"💖 {attacker_name} HP: {attacker['health']}, {defender_name} HP: {defender['health']}"
     )
 
-# ----------------------- FLEE COMMAND -----------------------
-@bot.tree.command(name="flee", description="Flee a pending battle")
-async def flee(interaction: discord.Interaction):
-    uid = interaction.user.id
-    found = None
-    for key, val in pending_battles.items():
-        if val["opponent"] == uid:
-            found = key
-            break
-
-    if not found:
-        await interaction.response.send_message("You have no battle invitations!")
-        return
-
-    info = pending_battles.pop(found)
-    flee_damage = 5
-    defender_char = characters[uid]
-    defender_char["health"] = max(defender_char["health"] - flee_damage, 0)
-
-    await interaction.response.send_message(
-        f"💨 **{defender_char['prefix']}** flees from battle!\n"
-        f"They take **{flee_damage} damage** but avoid full combat.\n"
-        f"💖 HP now: {defender_char['health']}"
-            )
-    
-@bot.tree.command(name="maintain_camp", description="Help maintain the camp")
 @bot.tree.command(name="maintain_camp", description="Help maintain the camp")
 async def maintain_camp(interaction: discord.Interaction):
 
