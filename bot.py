@@ -769,7 +769,7 @@ async def attack(interaction: discord.Interaction, opponent: discord.Member):
         f"⚔️ **{attacker['prefix']}** challenges **{defender['prefix']}**!",
         view=view
     )
-async def prompt_turn(interaction, attacker_id, defender_id):
+
 async def prompt_turn(interaction, attacker_id, defender_id):
     battle = battle_state.get((attacker_id, defender_id))
     if not battle:
