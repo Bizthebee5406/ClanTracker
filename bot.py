@@ -411,6 +411,10 @@ async def take_prey(interaction: discord.Interaction):
         f"Your hunger is now **{char['hunger']}**."
     )
 # ----------------------- BATTLE COMMAND -----------------------
+
+from discord.ui import View, Button
+
+# ----------------------- BATTLE COMMAND WITH BUTTONS -----------------------
 @bot.tree.command(name="battle", description="Challenge another cat")
 async def battle(interaction: discord.Interaction, opponent: discord.Member):
     uid = interaction.user.id
@@ -420,24 +424,59 @@ async def battle(interaction: discord.Interaction, opponent: discord.Member):
         await interaction.response.send_message("Both players must have a character to battle!")
         return
 
-    # Check if a battle is already pending
     if oid in pending_battles:
         await interaction.response.send_message("That cat already has a pending battle!")
         return
 
     attacker = characters[uid]
 
-    # Save battle invitation
-    pending_battles[oid] = {
-        "attacker": uid,
-        "opponent": oid
-    }
+    # Hunger warning for attacker
+    if attacker["hunger"] < 20:
+        view = View()
 
-    await interaction.response.send_message(
-        f"⚔️ **{attacker['prefix']}** has challenged **{opponent.display_name}** to a battle!\n"
+        async def confirm_callback(interact: discord.Interaction):
+            await start_battle(interaction, opponent)
+            for item in view.children:
+                item.disabled = True
+            await interact.message.edit(view=view)
+
+        async def cancel_callback(interact: discord.Interaction):
+            await interact.response.send_message("⚠️ Battle cancelled due to hunger.", ephemeral=True)
+            for item in view.children:
+                item.disabled = True
+            await interact.message.edit(view=view)
+
+        yes_btn = Button(label="Yes", style=discord.ButtonStyle.green)
+        yes_btn.callback = confirm_callback
+        no_btn = Button(label="No", style=discord.ButtonStyle.red)
+        no_btn.callback = cancel_callback
+
+        view.add_item(yes_btn)
+        view.add_item(no_btn)
+
+        await interaction.response.send_message(
+            "⚠️ You are too hungry to fight! Your hunger is low. Proceed with battle?",
+            view=view
+        )
+        return
+
+    # No hunger warning, start battle directly
+    await start_battle(interaction, opponent)
+
+# ----------------------- START BATTLE FUNCTION -----------------------
+async def start_battle(interaction: discord.Interaction, opponent: discord.Member):
+    uid = interaction.user.id
+    oid = opponent.id
+
+    # Save battle invitation
+    pending_battles[oid] = {"attacker": uid, "opponent": oid}
+
+    await interaction.followup.send(
+        f"⚔️ **{characters[uid]['prefix']}** has challenged **{opponent.display_name}**!\n"
         f"{opponent.mention}, do you accept? Use `/fight` to fight or `/flee` to flee."
     )
 
+# ----------------------- FIGHT COMMAND -----------------------
 @bot.tree.command(name="fight", description="Accept a pending battle")
 async def fight(interaction: discord.Interaction):
     uid = interaction.user.id
@@ -449,6 +488,7 @@ async def fight(interaction: discord.Interaction):
     attacker = characters[info["attacker"]]
     defender = characters[info["opponent"]]
 
+    # Rolls
     atk_stats = attacker["stats"]
     def_stats = defender["stats"]
 
@@ -458,13 +498,13 @@ async def fight(interaction: discord.Interaction):
     atk_total = atk_stats["strength"] + atk_stats["speed"] + atk_stats["dexterity"] + atk_stats["luck"] + atk_roll
     def_total = def_stats["strength"] + def_stats["speed"] + def_stats["dexterity"] + def_stats["intelligence"] + def_roll
 
-    # Add hunger modifiers
+    # Hunger modifiers
     atk_total += hunger_modifier_battle(attacker["hunger"])
     def_total += hunger_modifier_battle(defender["hunger"])
 
-    # Add camp bonus
-    global camp_quality
-    if camp_quality >= 80:
+    # Camp bonus
+    clan = defender["clan"]
+    if camp_quality.get(clan, 50) >= 80:
         def_total += 2
 
     # Resolve full names
@@ -481,11 +521,13 @@ async def fight(interaction: discord.Interaction):
     attacker_name = full_name(attacker)
     defender_name = full_name(defender)
 
-    # Determine result
+    # Determine result and apply damage
     if atk_total > def_total:
         result = f"⚔️ **{attacker_name}** wins the battle!"
+        defender["health"] = max(defender["health"] - 20, 0)
     elif def_total > atk_total:
         result = f"⚔️ **{defender_name}** wins the battle!"
+        attacker["health"] = max(attacker["health"] - 20, 0)
     else:
         result = "⚔️ The battle ends in a draw!"
 
@@ -493,69 +535,79 @@ async def fight(interaction: discord.Interaction):
         f"🐾 Battle Begins!\n\n"
         f"{attacker_name} roll: **{atk_roll}** + stats = **{atk_total}**\n"
         f"{defender_name} roll: **{def_roll}** + stats = **{def_total}**\n\n"
-        f"{result}"
+        f"{result}\n\n"
+        f"💖 {attacker_name} HP: {attacker['health']}, {defender_name} HP: {defender['health']}"
     )
 
-
+# ----------------------- FLEE COMMAND -----------------------
 @bot.tree.command(name="flee", description="Flee a pending battle")
 async def flee(interaction: discord.Interaction):
     uid = interaction.user.id
-    if uid not in pending_battles:
+    found = None
+    for key, val in pending_battles.items():
+        if val["opponent"] == uid:
+            found = key
+            break
+
+    if not found:
         await interaction.response.send_message("You have no battle invitations!")
         return
 
-    info = pending_battles.pop(uid)
-    attacker = characters[info["attacker"]]
-    defender = characters[info["opponent"]]
-
-    # Minimal damage to fleeing cat
+    info = pending_battles.pop(found)
     flee_damage = 5
     defender_char = characters[uid]
     defender_char["health"] = max(defender_char["health"] - flee_damage, 0)
 
     await interaction.response.send_message(
         f"💨 **{defender_char['prefix']}** flees from battle!\n"
-        f"They take **{flee_damage} damage** but avoid full combat."
-    )
-
+        f"They take **{flee_damage} damage** but avoid full combat.\n"
+        f"💖 HP now: {defender_char['health']}"
+            )
+    
+@bot.tree.command(name="maintain_camp", description="Help maintain the camp")
 @bot.tree.command(name="maintain_camp", description="Help maintain the camp")
 async def maintain_camp(interaction: discord.Interaction):
 
     uid = interaction.user.id
 
+    # Make sure the user has a character
     if uid not in characters:
         await interaction.response.send_message("Create a character first with /kit.")
         return
 
     char = characters[uid]
 
+    # Make sure the character has joined a clan
     if not char["clan"]:
-        await interaction.response.send_message("Join a clan first.")
+        await interaction.response.send_message("Join a clan first with /clan.")
         return
 
     clan = char["clan"]
 
+    # Random improvement amount
     improvement = random.randint(5, 15)
-
     camp_quality[clan] = min(100, camp_quality[clan] + improvement)
+
+    # Display condition message based on new quality
+    quality = camp_quality[clan]
+    if quality >= 90:
+        condition = "⭐ The camp is in excellent condition! The clan feels energized."
+    elif quality >= 70:
+        condition = "🌿 The camp is clean and well maintained."
+    elif quality >= 40:
+        condition = "🪶 The camp is in decent shape."
+    elif quality >= 15:
+        condition = "⚠️ The camp is getting messy."
+    else:
+        condition = "🚨 The camp is falling apart!"
 
     await interaction.response.send_message(
         f"🧹 You help repair dens and clear debris.\n"
-        f"Camp quality improved by **{improvement}**!\n"
-        f"New quality: **{camp_quality[clan]}**"
+        f"Camp quality improved by **{improvement}** points!\n"
+        f"New quality: **{quality}**\n"
+        f"{condition}"
     )
-
-if quality >= 90:
-    condition = "⭐ The camp is in excellent condition! The clan feels energized."
-elif quality >= 70:
-    condition = "🌿 The camp is clean and well maintained."
-elif quality >= 40:
-    condition = "🪶 The camp is in decent shape."
-elif quality >= 15:
-    condition = "⚠️ The camp is getting messy."
-else:
-    condition = "🚨 The camp is falling apart!"
-
+    
 @bot.tree.command(name="camp_decay", description="Lower camp quality (admin)")
 @app_commands.checks.has_permissions(administrator=True)
 async def camp_decay(interaction: discord.Interaction):
