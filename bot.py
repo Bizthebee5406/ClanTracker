@@ -369,14 +369,29 @@ async def donate(interaction: discord.Interaction):
 
 @bot.tree.command(name="preypile", description="View your clan's prey pile")
 async def preypile(interaction: discord.Interaction):
-warning = ""
-if total_prey < 10:
-    warning = "⚠️ Prey looks low. The clan might go hungry soon!"
+    uid = interaction.user.id
+    if uid not in characters:
+        await interaction.response.send_message("You don't have a character yet! Use /kit.")
+        return
 
-await interaction.response.send_message(
-    f"🍖 **{clan}Clan's total prey:** {total_prey}\n"
-    f"🪶 **Fresh kill pile:** {fresh}\n{warning}"
-)
+    char = characters[uid]
+    if not char["clan"]:
+        await interaction.response.send_message("You haven't joined a clan yet!")
+        return
+
+    clan = char["clan"]
+    total_prey = clan_prey_piles.get(clan, 0)
+    fresh = ", ".join(fresh_kill_piles[clan]) if fresh_kill_piles[clan] else "None"
+
+    warning = ""
+    if total_prey < 10:
+        warning = "⚠️ Prey looks low. The clan might go hungry soon!"
+
+    await interaction.response.send_message(
+        f"🍖 **{clan}Clan's total prey:** {total_prey}\n"
+        f"🪶 **Fresh kill pile:** {fresh}\n"
+        f"{warning}"
+    )
 
 @bot.tree.command(name="take_prey", description="Take prey from your clan's fresh kill pile")
 async def take_prey(interaction: discord.Interaction):
