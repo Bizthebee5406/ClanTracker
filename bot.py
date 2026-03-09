@@ -708,6 +708,8 @@ async def clan(interaction: discord.Interaction, clan_name: str):
     )
 
 # ----------------------- HUNT / EAT / DONATE -----------------------
+from discord.ui import View, Button
+
 @bot.tree.command(name="hunt", description="Go hunting to gather food")
 async def hunt(interaction: discord.Interaction):
     uid = interaction.user.id
@@ -835,7 +837,7 @@ async def hunt(interaction: discord.Interaction):
     else:
         await interaction.response.send_message(
             f"❌ Hunt failed. No prey this time.\nHunger: {char['hunger']}/100"
-            )
+        )
 # ----------------------- MEDICINE CAT -----------------------
 @bot.tree.command(name="see_medicine_cat", description="Heal yourself via medicine cat")
 async def see_medicine_cat(interaction: discord.Interaction):
