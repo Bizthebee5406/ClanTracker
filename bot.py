@@ -350,58 +350,22 @@ async def propose_breeding(interaction: discord.Interaction, partner: discord.Me
 async def pregnancy_status(interaction: discord.Interaction):
     uid = interaction.user.id
     char = characters.get(uid)
-
     if not char or not char.get("pregnant"):
         await interaction.response.send_message("You are not pregnant.")
         return
 
     months = char["pregnant"]["months"]
     carrier = char["pregnant"]["carrier"]
-    stage_msg = f"🌱 Month {months+1} of 5. Carrier: {carrier}"
-
     suggestions = []
     if char["hunger"] < 60:
         suggestions.append("Eat more to support your kits.")
     if char.get("training_sessions", 0) > 2:
         suggestions.append("Avoid overtraining to keep kits healthy.")
     if camp_quality[char["clan"]] < 50:
-        suggestions.append("Help improve camp quality to benefit kit health.")
+        suggestions.append("Help improve camp quality for kit health.")
 
     suggestion_msg = "\n".join(suggestions) if suggestions else "You're doing well. Keep resting and eating!"
-
-    await interaction.response.send_message(
-        f"{stage_msg}\n\n💡 Suggestions:\n{suggestion_msg}"
-    )
-
-# ---------------- UPDATE COMMANDS TO INCLUDE PREGNANCY EFFECT ----------------
-# Example: battle_effect
-def apply_pregnancy_effects(char, context="battle"):
-    if not char.get("pregnant"):
-        return 1.0  # no penalty
-
-    stage = char["pregnant"]["months"]
-    if context == "battle":
-        return battle_penalty(stage)
-    return 1.0
-
-# Example usage in battle:
-# damage = int(base_damage * apply_pregnancy_effects(attacker_char))
-
-# ---------------- UPDATE HUNTING ----------------
-def pregnancy_hunt_modifier(char):
-    if not char.get("pregnant"):
-        return 0
-    stage = char["pregnant"]["months"]
-    return stage * 2  # more hunger per stage
-
-# Example usage: char["hunger"] -= base_hunger_cost + pregnancy_hunt_modifier(char)
-
-# ---------------- UPDATE TRAINING ----------------
-def pregnancy_train_allowed(char):
-    if not char.get("pregnant"):
-        return True
-    stage = char["pregnant"]["months"]
-    return stage <= 2  # only early pregnancy allows light training
+    await interaction.response.send_message(f"🌱 Month {months+1}/5, Carrier: {carrier}\n💡 Suggestions:\n{suggestion_msg}")
 # ----------------------- AGE COMMAND -----------------------
 @bot.tree.command(name="age", description="Age your character by one moon.")
 async def age(interaction: discord.Interaction):
@@ -437,37 +401,44 @@ async def age(interaction: discord.Interaction):
     )
 
 # ----------------------- PREYPILE COMMAND -----------------------
-@bot.tree.command(name="preypile", description="View your clan's prey pile")
-async def preypile(interaction: discord.Interaction):
+@bot.tree.command(name="take_prey", description="Take prey from your clan's fresh kill pile")
+async def take_prey(interaction: discord.Interaction):
     uid = interaction.user.id
+
     if uid not in characters:
-        await interaction.response.send_message("You don't have a character yet! Use /kit.")
+        await interaction.response.send_message("❌ You don't have a character yet! Use /kit.")
         return
 
     char = characters[uid]
 
     if not char.get("clan"):
-        await interaction.response.send_message("You haven't joined a clan yet!")
+        await interaction.response.send_message("⚠️ Join a clan first with /clan.")
         return
 
     clan = char["clan"]
 
-    # Ensure starting food exists
-    if clan_prey_piles.get(clan, 0) == 0:
-        clan_prey_piles[clan] = 10  # starting food points
-        fresh_kill_piles[clan] = ["mouse", "rabbit", "vole"]  # starter prey
+    if not fresh_kill_piles[clan]:
+        await interaction.response.send_message("The fresh kill pile is empty!")
+        return
 
-    total_prey = clan_prey_piles.get(clan, 0)
-    fresh = ", ".join(fresh_kill_piles[clan]) if fresh_kill_piles[clan] else "None"
+    prey = fresh_kill_piles[clan].pop(0)
 
-    warning = ""
-    if total_prey < 10:
-        warning = "⚠️ Prey looks low. The clan might go hungry soon!"
+    # Base hunger gain
+    hunger_gain = 40
+
+    # Extra hunger gain if pregnant
+    if char.get("pregnant"):
+        hunger_gain += char["pregnant"]["months"] * 5  # more nourishment for kits
+
+    char["hunger"] = min(char["hunger"] + hunger_gain, 100)
+
+    # Small impact on camp quality
+    camp_quality[clan] = max(0, camp_quality[clan] - 2)
 
     await interaction.response.send_message(
-        f"🍖 **{clan}Clan's total prey:** {total_prey}\n"
-        f"🪶 **Fresh kill pile:** {fresh}\n"
-        f"{warning}"
+        f"🍖 You take a **{prey}** from the fresh kill pile and eat it.\n"
+        f"Your hunger is now **{char['hunger']}/100**\n"
+        f"🏕 Camp quality slightly decreased: **{camp_quality[clan]}**"
     )
 # ----------------------- PROFILE -----------------------
 @bot.tree.command(name="profile", description="View your character profile")
@@ -477,13 +448,23 @@ async def profile(interaction: discord.Interaction):
     if not char:
         await interaction.response.send_message("❌ You don't have a character yet.")
         return
-    embed = discord.Embed(title=f"{char['prefix']}'s Profile", color=discord.Color.green())
-    embed.add_field(name="Clan", value=char["clan"], inline=True)
-    embed.add_field(name="Age", value=f"{char['moons']} moons", inline=True)
-    embed.add_field(name="Health ❤️", value=f"{char['health']}/100\n{health_status(char['health'])}", inline=False)
-    embed.add_field(name="Hunger 🍖", value=f"{char['hunger']}/100\n{hunger_status(char['hunger'])}", inline=False)
-    await interaction.response.send_message(embed=embed)
 
+    hunger_msg = hunger_status(char["hunger"])
+    health_msg = health_status(char["health"])
+    preg_msg = ""
+    if char.get("pregnant"):
+        months = char["pregnant"]["months"]
+        preg_msg = f"🌱 Pregnant, Month {months+1}/5, Carrier: {char['pregnant']['carrier']}"
+
+    embed = discord.Embed(title=f"{char['prefix']}'s Profile", color=discord.Color.green())
+    embed.add_field(name="Clan", value=char.get("clan", "None"), inline=True)
+    embed.add_field(name="Age", value=f"{char.get('moons',0)} moons", inline=True)
+    embed.add_field(name="Health ❤️", value=f"{char['health']}/100\n{health_msg}", inline=False)
+    embed.add_field(name="Hunger 🍖", value=f"{char['hunger']}/100\n{hunger_msg}", inline=False)
+    if preg_msg:
+        embed.add_field(name="Pregnancy", value=preg_msg, inline=False)
+
+    await interaction.response.send_message(embed=embed)
 # ----------------------- CLAN COMMAND -----------------------
 @bot.tree.command(name="clan", description="Join a clan")
 async def clan(interaction: discord.Interaction, clan_name: str):
@@ -514,44 +495,92 @@ async def clan(interaction: discord.Interaction, clan_name: str):
     )
 
 # ----------------------- HUNT / EAT / DONATE -----------------------
-@bot.tree.command(name="hunt", description="Hunt for prey")
+@bot.tree.command(name="hunt", description="Go hunting to gather food")
 async def hunt(interaction: discord.Interaction):
     uid = interaction.user.id
-    if uid not in characters:
-        await interaction.response.send_message("Create a character first with /kit.")
+    char = characters.get(uid)
+    
+    if not char:
+        await interaction.response.send_message("❌ You don't have a character yet. Use /kit.")
         return
-    char = characters[uid]
-    if in_battle(uid):
-        await interaction.response.send_message("⚔️ You can't hunt during battle.")
+    
+    if not char.get("clan"):
+        await interaction.response.send_message("⚠️ You need to join a clan first with /clan.")
         return
-    if not char["clan"]:
-        await interaction.response.send_message("Join a clan first.")
-        return
-    clan = char["clan"]
-    table = prey_tables.get(clan, {}).get(season, {})
-    if not table:
-        await interaction.response.send_message("No prey available this season.")
-        return
-    success, food = hunting_outcome(char)
-    if not success:
-        await interaction.response.send_message(f"{random.choice(hunt_messages)}\n❌ The prey escaped.")
-        return
-    prey = random.choice(list(table.keys()))
-    value = table[prey]
-    pending_hunts[uid] = {"prey": prey, "value": value, "clan": clan}
-    await interaction.response.send_message(f"{random.choice(hunt_messages)}\n🐾 You caught a **{prey}**! Use /eat or /donate.")
 
-@bot.tree.command(name="eat", description="Eat hunted prey")
+    # Pregnancy check: harder to hunt if pregnant
+    preg_penalty = pregnancy_hunt_modifier(char)
+
+    # Base hunt success chance
+    base_success = 70 - preg_penalty
+    hunger = char["hunger"]
+
+    # Modify success based on hunger
+    if hunger <= 0:
+        base_success -= 40
+    elif hunger < 20:
+        base_success -= 20
+    elif hunger < 40:
+        base_success -= 10
+    elif hunger >= 90:
+        base_success -= 15
+
+    # Random roll
+    roll = random.randint(1, 100)
+    success = roll <= base_success
+
+    # Determine food gained
+    food_gained = random.randint(5, 15)
+    if hunger < 20:
+        food_gained = max(1, food_gained - 5)
+    elif hunger >= 70:
+        food_gained += 2
+
+    # Reduce food if pregnant
+    if char.get("pregnant"):
+        food_gained = max(1, food_gained - char["pregnant"]["months"] * 2)
+
+    # Reduce hunger for effort
+    hunger_cost = 5 + preg_penalty
+    char["hunger"] = max(char["hunger"] - hunger_cost, 0)
+
+    if success:
+        prey = random.choice(list(prey_tables[char["clan"]][season].keys()))
+        value = prey_tables[char["clan"]][season][prey]
+
+        pending_hunts[uid] = {"prey": prey, "value": value, "clan": char["clan"]}
+
+        await interaction.response.send_message(
+            f"🎯 **Hunt successful!** You caught a **{prey}** worth {value} points.\n"
+            f"Hunger: {char['hunger']}/100"
+        )
+    else:
+        await interaction.response.send_message(
+            f"❌ Hunt failed. No prey this time.\nHunger: {char['hunger']}/100"
+        )
+        
+@bot.tree.command(name="eat", description="Eat the prey you just hunted")
 async def eat(interaction: discord.Interaction):
     uid = interaction.user.id
     if uid not in pending_hunts:
         await interaction.response.send_message("You have no prey waiting. Go hunt first!")
         return
+
     char = characters[uid]
     prey_info = pending_hunts.pop(uid)
-    char["hunger"] = min(char["hunger"] + 50, 100)
-    await interaction.response.send_message(f"🍖 You ate the **{prey_info['prey']}**!\nHunger: **{char['hunger']}**")
 
+    # Eating restores hunger
+    hunger_gain = 50
+    if char.get("pregnant"):
+        # Pregnant cats need more food
+        hunger_gain += char["pregnant"]["months"] * 5
+    char["hunger"] = min(char["hunger"] + hunger_gain, 100)
+
+    await interaction.response.send_message(
+        f"🍖 You ate the **{prey_info['prey']}**!\n"
+        f"Your hunger is now **{char['hunger']}/100**"
+    )
+    
 @bot.tree.command(name="donate", description="Add prey to clan pile")
 async def donate(interaction: discord.Interaction):
     uid = interaction.user.id
@@ -562,7 +591,6 @@ async def donate(interaction: discord.Interaction):
     fresh_kill_piles[prey_info["clan"]].append(prey_info["prey"])
     clan_prey_piles[prey_info["clan"]] += prey_info["value"]
     await interaction.response.send_message(f"🐾 Added **{prey_info['prey']}** to **{prey_info['clan']}Clan** fresh kill pile!")
-
 # ----------------------- MEDICINE CAT -----------------------
 @bot.tree.command(name="see_medicine_cat", description="Heal yourself via medicine cat")
 async def see_medicine_cat(interaction: discord.Interaction):
@@ -589,30 +617,25 @@ async def see_medicine_cat(interaction: discord.Interaction):
     await interaction.response.send_message(f"🌿 The medicine cat treats your wounds.\nRecovered **{healed} HP**.\nHealth: **{char['health']}/100**")
 
 # ----------------------- TRAIN COMMAND -----------------------
-@bot.tree.command(name="train", description="Train your character")
+@bot.tree.command(name="train", description="Train your character to improve stats.")
 async def train(interaction: discord.Interaction):
-    uid = interaction.user.id
-    char = characters.get(uid)
-    if not char or not char.get("alive",True):
-        await interaction.response.send_message("❌ No living character.")
+    user_id = interaction.user.id
+    char = characters.get(user_id)
+    if not char or not char.get("alive", True):
+        await interaction.response.send_message("❌ You don't have a living character.")
         return
-    max_sessions = 3
-    base_hunger_cost = -5
-    sessions = char.get("training_sessions",0)
-    hunger_cost = base_hunger_cost * (1 + sessions)
-    msg = modify_hunger(char,hunger_cost)
-    if msg and not char.get("alive",True):
-        await interaction.response.send_message(msg)
-        return
-    char["training_sessions"] = sessions + 1
-    if char["training_sessions"] > max_sessions:
-        char["exhaustion"] = char.get("exhaustion",0) +1
-    if char.get("exhaustion",0) > 5:
-        await interaction.response.send_message(f"💤 {char['prefix']} is too exhausted to train this moon!")
-        return
-    char["stats"]["strength"] = char["stats"].get("strength",10)+1
-    await interaction.response.send_message(f"💪 {char['prefix']} trains +1 strength!\nHunger: {char['hunger']}\nExhaustion: {char.get('exhaustion',0)}\n{msg or ''}")
 
+    if not pregnancy_train_allowed(char):
+        await interaction.response.send_message("⚠️ You are too far along in pregnancy to train safely.")
+        return
+
+    char["strength"] = char.get("strength", 10) + 1
+    hunger_cost = -5
+    char["hunger"] = max(0, char["hunger"] + hunger_cost + pregnancy_hunt_modifier(char))
+
+    await interaction.response.send_message(
+        f"💪 {char['prefix']} trains and gains +1 strength!\nHunger: {char['hunger']}"
+    )
 # ----------------------- BATTLE SYSTEM -----------------------
 from discord.ui import View, Button
 
@@ -620,83 +643,106 @@ from discord.ui import View, Button
 async def attack(interaction: discord.Interaction, opponent: discord.Member):
     uid = interaction.user.id
     oid = opponent.id
+
     if uid == oid:
         await interaction.response.send_message("❌ You cannot fight yourself.")
         return
+
     attacker = characters.get(uid)
     defender = characters.get(oid)
+
     if not attacker or not defender:
         await interaction.response.send_message("❌ One of you doesn't have a character.")
         return
+
     if attacker["hunger"] < 10:
-        await interaction.response.send_message(f"🥀 {attacker['prefix']} is too hungry to fight!")
+        await interaction.response.send_message(
+            f"🥀 {attacker['prefix']} is too hungry to fight!"
+        )
         return
+
     pending_battles[oid] = uid
+
     view = View()
+
     async def accept(i):
         if i.user.id != oid:
-            await i.response.send_message("❌ Only the challenged player can accept.",ephemeral=True)
+            await i.response.send_message("❌ Only the challenged player can accept.", ephemeral=True)
             return
-        battle_state[(uid,oid)] = {"attacker": uid,"defender":oid,"turn":uid,"charge":{}}
-        await i.response.edit_message("⚔️ Battle accepted!", view=None)
+
+        # Initiate battle state
+        battle_state[(uid, oid)] = {
+            "attacker": uid,
+            "defender": oid,
+            "turn": uid,
+            "charge": {}
+        }
+
+        await i.response.edit_message(content="⚔️ Battle accepted!", view=None)
         await prompt_turn(i, uid, oid)
+
     async def decline(i):
         if i.user.id != oid:
-            await i.response.send_message("❌ Only the challenged player can decline.",ephemeral=True)
+            await i.response.send_message("❌ Only the challenged player can decline.", ephemeral=True)
             return
-        pending_battles.pop(oid,None)
-        await i.response.edit_message("❌ Battle declined.",view=None)
-    btn_accept = Button(label="Accept",style=discord.ButtonStyle.green)
-    btn_decline = Button(label="Decline",style=discord.ButtonStyle.red)
+        pending_battles.pop(oid, None)
+        await i.response.edit_message(content="❌ Battle declined.", view=None)
+
+    btn_accept = Button(label="Accept", style=discord.ButtonStyle.green)
+    btn_decline = Button(label="Decline", style=discord.ButtonStyle.red)
     btn_accept.callback = accept
     btn_decline.callback = decline
     view.add_item(btn_accept)
     view.add_item(btn_decline)
-    await interaction.response.send_message(f"⚔️ **{attacker['prefix']}** challenges **{defender['prefix']}**!",view=view)
 
+    await interaction.response.send_message(
+        f"⚔️ **{attacker['prefix']}** challenges **{defender['prefix']}**!",
+        view=view
+    )
 async def prompt_turn(interaction, attacker_id, defender_id):
-    battle = battle_state.get((attacker_id,defender_id))
-    if not battle: return
+async def prompt_turn(interaction, attacker_id, defender_id):
+    battle = battle_state.get((attacker_id, defender_id))
+    if not battle:
+        return
+
     turn_id = battle["turn"]
     char = characters[turn_id]
-    moves = MOVES.get(char["clan"],[])
+    moves = MOVES.get(char["clan"], [])
+
     view = View(timeout=60)
+
     for move in moves:
         async def callback(i, move=move):
             if i.user.id != turn_id:
-                await i.response.send_message("❌ It's not your turn.",ephemeral=True)
+                await i.response.send_message("❌ It's not your turn.", ephemeral=True)
                 return
             await execute_move(i, attacker_id, defender_id, move)
+
         btn = Button(label=move["name"], style=discord.ButtonStyle.blurple)
         btn.callback = callback
         view.add_item(btn)
+
     await interaction.followup.send(
         f"🎯 **{char['prefix']}**'s turn!",
         view=view
     )
 
 async def execute_move(interaction, attacker_id, defender_id, move):
-    battle = battle_state.get((attacker_id, defender_id))
-    if not battle:
-        await interaction.response.send_message("❌ Battle not found.", ephemeral=True)
-        return
-
+    battle = battle_state[(attacker_id, defender_id)]
     turn_id = battle["turn"]
     enemy_id = defender_id if turn_id == attacker_id else attacker_id
 
-    if interaction.user.id != turn_id:
-        await interaction.response.send_message("❌ It's not your turn.", ephemeral=True)
-        return
-
     attacker = characters[turn_id]
     defender = characters[enemy_id]
-    result = ""
 
-    # -------- Charge Moves --------
+    result = ""
+    # ---- Charge Moves ----
     if move["type"] == "charge":
         charge = battle["charge"].get(turn_id)
         if charge:
             damage = move["damage"]
+            # Apply pregnancy penalty
+            damage = int(damage * apply_pregnancy_effects(attacker))
             defender["health"] = max(defender["health"] - damage, 0)
             battle["charge"].pop(turn_id)
             result = f"💥 {attacker['prefix']} unleashes **{move['name']}** for {damage} damage!"
@@ -704,43 +750,40 @@ async def execute_move(interaction, attacker_id, defender_id, move):
             battle["charge"][turn_id] = move
             result = f"⚡ {attacker['prefix']} begins charging **{move['name']}**!"
 
-    # -------- Status Moves --------
+    # ---- Status Moves ----
     elif move["type"] == "status":
         buffs = move.get("buff", {})
         if "heal" in buffs:
             attacker["health"] = min(attacker["health"] + buffs["heal"], 100)
-            result = f"✨ {attacker['prefix']} uses **{move['name']}** and heals {buffs['heal']} HP!"
-        else:
-            # Can extend for attack_up, defense_up etc.
-            result = f"✨ {attacker['prefix']} uses **{move['name']}**!"
+        result = f"✨ {attacker['prefix']} uses **{move['name']}**!"
 
-    # -------- Physical Moves --------
+    # ---- Physical Moves ----
     else:
-        damage = move.get("damage", 5) + hunger_modifier(attacker["hunger"])
+        damage = move["damage"] + hunger_modifier(attacker["hunger"])
+        damage = int(damage * apply_pregnancy_effects(attacker))
         damage = max(1, damage)
         defender["health"] = max(defender["health"] - damage, 0)
         result = f"💥 {attacker['prefix']} uses **{move['name']}** for **{damage} damage**!"
 
-    # Switch turn
+    # ---- Switch turn ----
     battle["turn"] = enemy_id
-
     await interaction.response.send_message(
         f"{result}\n"
         f"❤️ {attacker['prefix']} HP: {attacker['health']}\n"
         f"❤️ {defender['prefix']} HP: {defender['health']}"
     )
 
-    # Check victory
+    # ---- Check Victory ----
     if attacker["health"] <= 0 or defender["health"] <= 0:
         winner = attacker if attacker["health"] > 0 else defender
         loser = defender if winner == attacker else attacker
-        end_battle(attacker_id, defender_id)
-        await interaction.followup.send(f"🏆 **{winner['prefix']}** wins! **{loser['prefix']}** is defeated.")
+        battle_state.pop((attacker_id, defender_id), None)
+        await interaction.followup.send(
+            f"🏆 **{winner['prefix']}** wins! **{loser['prefix']}** is defeated."
+        )
         return
 
-    # Continue battle
     await prompt_turn(interaction, attacker_id, defender_id)
-
 # ----------------------- CAMP COMMANDS -----------------------
 @bot.tree.command(name="maintain_camp", description="Help maintain the camp")
 async def maintain_camp(interaction: discord.Interaction):
