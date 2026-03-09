@@ -456,6 +456,49 @@ MOVES = {
     ]
 }
 
+@bot.tree.command(name="battle", description="Challenge another player to battle")
+async def battle(interaction: discord.Interaction, opponent: discord.Member):
+
+    attacker_id = interaction.user.id
+    defender_id = opponent.id
+
+    if attacker_id == defender_id:
+        await interaction.response.send_message("❌ You cannot battle yourself.", ephemeral=True)
+        return
+
+    attacker_char = characters.get(attacker_id)
+
+    if not attacker_char:
+        await interaction.response.send_message("❌ You don't have a character yet.", ephemeral=True)
+        return
+
+    hunger = attacker_char.get("hunger", 100)
+
+    # Hunger warning
+    if hunger <= 20:
+
+        class HungerWarning(discord.ui.View):
+
+            @discord.ui.button(label="Fight Anyway", style=discord.ButtonStyle.danger)
+            async def continue_fight(self, interaction2: discord.Interaction, button: discord.ui.Button):
+                await start_battle(interaction2, opponent)
+
+            @discord.ui.button(label="Cancel", style=discord.ButtonStyle.secondary)
+            async def cancel(self, interaction2: discord.Interaction, button: discord.ui.Button):
+                await interaction2.response.send_message("🍖 You decide to eat before fighting.", ephemeral=True)
+
+        await interaction.response.send_message(
+            "⚠️ **You're too hungry to fight effectively!**\n"
+            "Your attacks may be weaker.\n"
+            "Do you still want to battle?",
+            view=HungerWarning(),
+            ephemeral=True
+        )
+
+        return
+
+    await start_battle(interaction, opponent)
+
 # ---------------- HUNGER MODIFIER ----------------
 def hunger_modifier_battle(hunger):
     if hunger < 30:
