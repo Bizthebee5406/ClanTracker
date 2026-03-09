@@ -426,7 +426,7 @@ async def take_prey(interaction: discord.Interaction):
     )
     # ----------------- Battle Imports -----------------
 #
- from discord.ui import View, Button
+from discord.ui import View, Button
 import random
 import discord
 
