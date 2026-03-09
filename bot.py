@@ -16,6 +16,23 @@ pending_hunts = {}  # stores prey for eat/donate
 pending_battles = {}  # stores pending battle invitations
 
 # ----------------------- HUNGER MODIFIERS -----------------------
+def hunger_status(hunger):
+
+    if hunger <= 0:
+        return "💀 Starving! You must eat immediately."
+    elif hunger < 20:
+        return "⚠️ Starving — hunt immediately."
+    elif hunger < 40:
+        return "🥀 Very hungry."
+    elif hunger < 60:
+        return "🍂 Getting hungry."
+    elif hunger < 80:
+        return "🍖 Satisfied."
+    elif hunger < 100:
+        return "😌 Well fed."
+    else:
+        return "🐗 Overstuffed."
+        
 def hunger_modifier_hunt(hunger):
     if hunger < 30:
         return -5
@@ -39,6 +56,39 @@ def hunger_modifier_battle(hunger):
         return 0
     else:
         return -3  # overstuffed
+
+def health_status(health):
+
+    if health <= 0:
+        return "💀 Dead."
+    elif health < 20:
+        return "🚨 Critically injured! See a medicine cat immediately!"
+    elif health < 40:
+        return "⚠️ Badly wounded — seek a medicine cat."
+    elif health < 70:
+        return "🩹 Injured."
+    else:
+        return "💪 Healthy."
+
+def modify_hunger(char, amount):
+
+    char["hunger"] += amount
+    char["hunger"] = max(0, min(100, char["hunger"]))
+
+    if char["hunger"] <= 0:
+        char["alive"] = False
+        return f"💀 {char['prefix']} has starved to death."
+
+    if char["hunger"] < 20:
+        return "⚠️ You are starving!"
+
+    return None
+
+def in_battle(user_id):
+    for attacker, defender in battle_state.keys():
+        if user_id == attacker or user_id == defender:
+            return True
+    return False
 
 camp_quality = {
     "Thunder": 75,
@@ -121,7 +171,7 @@ async def kit(interaction: discord.Interaction, prefix: str):
     characters[uid] = {
     "prefix": prefix,
     "rank": "kit",
-    "moons": 0,
+    "age": 0
     "suffix": None,
     "clan": None,
     "health": 100,
@@ -763,7 +813,8 @@ async def see_medicine_cat(interaction: discord.Interaction):
 
     actual_heal = char["health"] - old_health
 
-    camp["quality"] = max(0, camp["quality"] - 2)
+    clan = char["clan"]
+camp_quality[clan] = max(0, camp_quality[clan] - 2)
 
     messages = [
         "🌿 The medicine cat applies herbs to your wounds.",
@@ -781,7 +832,6 @@ async def see_medicine_cat(interaction: discord.Interaction):
         f"🏕 Camp quality decreased slightly."
     )
 # ----------------------- TRAIN COMMAND -----------------------
-@bot.tree.command(name="train", description="Train to improve your skills.")
 @bot.tree.command(name="train", description="Train your character to improve stats.")
 async def train(interaction: discord.Interaction):
     user_id = interaction.user.id
