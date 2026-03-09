@@ -440,6 +440,39 @@ async def take_prey(interaction: discord.Interaction):
         f"Your hunger is now **{char['hunger']}/100**\n"
         f"🏕 Camp quality slightly decreased: **{camp_quality[clan]}**"
     )
+
+@bot.tree.command(name="take_prey", description="Take prey from your clan's fresh kill pile")
+async def take_prey(interaction: discord.Interaction):
+
+    uid = interaction.user.id
+
+    if uid not in characters:
+        await interaction.response.send_message("You don't have a character yet! Use /kit.")
+        return
+
+    char = characters[uid]
+
+    if not char["clan"]:
+        await interaction.response.send_message("Join a clan first with /clan.")
+        return
+
+    clan = char["clan"]
+
+    if not fresh_kill_piles[clan]:
+        await interaction.response.send_message(
+            "The fresh kill pile is empty!"
+        )
+        return
+
+    prey = fresh_kill_piles[clan].pop(0)
+
+    # restore hunger
+    char["hunger"] = min(char["hunger"] + 40, 100)
+
+    await interaction.response.send_message(
+        f"🍖 You take a **{prey}** from the fresh kill pile and eat it.\n"
+        f"Your hunger is now **{char['hunger']}**."
+    )
 # ----------------------- PROFILE -----------------------
 @bot.tree.command(name="profile", description="View your character profile")
 async def profile(interaction: discord.Interaction):
