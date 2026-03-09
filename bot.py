@@ -87,6 +87,14 @@ MOVES = {
 def generate_stats():
     return {stat: random.randint(0, 10) for stat in ["strength","perception","dexterity","speed","intelligence","luck","charisma"]}
 
+def check_for_apprentice(uid):
+    char = characters[uid]
+    if char["rank"] == "kit" and char.get("moons", 0) >= 6:
+        char["rank"] = "apprentice"
+        char["specialty"] = char.get("clan")  # maybe keep track of mentor later
+        return f"🌟 {char['prefix']} has become an apprentice!"
+    return None
+    
 def hunger_status(hunger):
     if hunger <= 0: return "💀 Starving!"
     elif hunger < 20: return "⚠️ Starving — hunt immediately."
@@ -375,14 +383,22 @@ async def age(interaction: discord.Interaction):
         await interaction.response.send_message("❌ You don't have a living character.")
         return
 
-    # Aging reduces hunger
+    # Age character by one moon
     char["moons"] = char.get("moons", 0) + 1
+
+    # Reduce hunger slightly each moon
     hunger_cost = -10
     char["hunger"] = max(0, char["hunger"] + hunger_cost)
 
     # Reset training sessions and exhaustion each moon
     char["training_sessions"] = 0
     char["exhaustion"] = 0
+
+    # Check if kit becomes apprentice at 6 moons
+    apprentice_msg = ""
+    if char["rank"] == "kit" and char.get("moons", 0) >= 6:
+        char["rank"] = "apprentice"
+        apprentice_msg = f"🌟 {char['prefix']} has grown into an apprentice!"
 
     # Hunger warnings
     msg = ""
@@ -393,13 +409,15 @@ async def age(interaction: discord.Interaction):
     elif char["hunger"] < 20:
         msg = "⚠️ You are starving and need to eat soon!"
 
+    if apprentice_msg:
+        msg += f"\n{apprentice_msg}"
+
     await interaction.response.send_message(
         f"🌙 {char['prefix']} ages one moon.\n"
         f"Age: {char['moons']} moons\n"
         f"Hunger -10 → {char['hunger']}\n"
         f"{msg}"
     )
-
 # ----------------------- PREYPILE COMMAND -----------------------
 from discord.ui import View, Button
 
