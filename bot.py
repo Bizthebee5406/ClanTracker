@@ -16,8 +16,21 @@ pending_hunts = {}
 pending_battles = {}
 battle_state = {}
 camp_quality = {"Thunder": 75, "River": 75, "Shadow": 75, "Wind": 75}
-clan_prey_piles = {"Thunder": 0, "River": 0, "Shadow": 0, "Wind": 0}
-fresh_kill_piles = {"Thunder": [], "River": [], "Shadow": [], "Wind": []}
+# ----------------------- INITIAL CLAN PREY -----------------------
+# Each clan starts with some prey so kits can eat
+clan_prey_piles = {
+    "Thunder": 20,
+    "River": 20,
+    "Shadow": 20,
+    "Wind": 20
+}
+
+fresh_kill_piles = {
+    "Thunder": ["mouse", "rabbit", "vole"],
+    "River": ["fish", "frog", "water vole"],
+    "Shadow": ["rat", "lizard", "frog"],
+    "Wind": ["rabbit", "hare", "mouse"]
+}
 seasons = ["newleaf", "greenleaf", "leaf-fall", "leafbare"]
 season = "greenleaf"
 
@@ -171,6 +184,73 @@ async def kit(interaction: discord.Interaction, prefix: str):
         f"**Stats**:\n" + "\n".join(f"{k.capitalize()}: {v}" for k,v in stats.items())
     )
 
+# ----------------------- AGE COMMAND -----------------------
+@bot.tree.command(name="age", description="Age your character by one moon.")
+async def age(interaction: discord.Interaction):
+    uid = interaction.user.id
+    char = characters.get(uid)
+    if not char or not char.get("alive", True):
+        await interaction.response.send_message("❌ You don't have a living character.")
+        return
+
+    # Aging reduces hunger
+    char["moons"] = char.get("moons", 0) + 1
+    hunger_cost = -10
+    char["hunger"] = max(0, char["hunger"] + hunger_cost)
+
+    # Reset training sessions and exhaustion each moon
+    char["training_sessions"] = 0
+    char["exhaustion"] = 0
+
+    # Hunger warnings
+    msg = ""
+    if char["hunger"] <= 0:
+        char["alive"] = False
+        await interaction.response.send_message(f"💀 {char['prefix']} has starved to death.")
+        return
+    elif char["hunger"] < 20:
+        msg = "⚠️ You are starving and need to eat soon!"
+
+    await interaction.response.send_message(
+        f"🌙 {char['prefix']} ages one moon.\n"
+        f"Age: {char['moons']} moons\n"
+        f"Hunger -10 → {char['hunger']}\n"
+        f"{msg}"
+    )
+
+# ----------------------- PREYPILE COMMAND -----------------------
+@bot.tree.command(name="preypile", description="View your clan's prey pile")
+async def preypile(interaction: discord.Interaction):
+    uid = interaction.user.id
+    if uid not in characters:
+        await interaction.response.send_message("You don't have a character yet! Use /kit.")
+        return
+
+    char = characters[uid]
+
+    if not char.get("clan"):
+        await interaction.response.send_message("You haven't joined a clan yet!")
+        return
+
+    clan = char["clan"]
+
+    # Ensure starting food exists
+    if clan_prey_piles.get(clan, 0) == 0:
+        clan_prey_piles[clan] = 10  # starting food points
+        fresh_kill_piles[clan] = ["mouse", "rabbit", "vole"]  # starter prey
+
+    total_prey = clan_prey_piles.get(clan, 0)
+    fresh = ", ".join(fresh_kill_piles[clan]) if fresh_kill_piles[clan] else "None"
+
+    warning = ""
+    if total_prey < 10:
+        warning = "⚠️ Prey looks low. The clan might go hungry soon!"
+
+    await interaction.response.send_message(
+        f"🍖 **{clan}Clan's total prey:** {total_prey}\n"
+        f"🪶 **Fresh kill pile:** {fresh}\n"
+        f"{warning}"
+    )
 # ----------------------- PROFILE -----------------------
 @bot.tree.command(name="profile", description="View your character profile")
 async def profile(interaction: discord.Interaction):
