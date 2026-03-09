@@ -710,71 +710,6 @@ async def clan(interaction: discord.Interaction, clan_name: str):
 # ----------------------- HUNT / EAT / DONATE -----------------------
 from discord.ui import View, Button
 
-class HuntView(View):
-    def __init__(self, user_id):
-        super().__init__(timeout=None)
-        self.user_id = user_id
-
-    @discord.ui.button(label="Eat", style=discord.ButtonStyle.green)
-    async def eat(self, button: Button, interaction: discord.Interaction):
-        if interaction.user.id != self.user_id:
-            await interaction.response.send_message("This isn't your hunt!", ephemeral=True)
-            return
-
-        if self.user_id not in pending_hunts:
-            await interaction.response.send_message("You have no prey waiting!", ephemeral=True)
-            return
-
-        char = characters[self.user_id]
-        prey_info = pending_hunts.pop(self.user_id)
-
-        if char.get("illegal_eat"):
-            await interaction.response.send_message(
-                "⚠️ You've already eaten extra prey this moon! Wait until you age to eat again.",
-                ephemeral=True
-            )
-            return
-
-        stealth_roll = char["stats"]["dexterity"] + char["stats"]["luck"]
-        caught_roll = random.randint(1, 20)
-
-        if stealth_roll < caught_roll:
-            char["illegal_eat"] = True
-            await interaction.response.send_message(
-                f"❌ You tried to eat the **{prey_info['prey']}**, but were caught by clan elders!\n"
-                f"You can't eat any more extra prey until you age up.",
-                ephemeral=True
-            )
-        else:
-            hunger_gain = 50
-            if char.get("pregnant"):
-                hunger_gain += char["pregnant"]["months"] * 5
-            char["hunger"] = min(char["hunger"] + hunger_gain, 100)
-            await interaction.response.send_message(
-                f"🍖 You ate the **{prey_info['prey']}**.\n"
-                f"You feel a little guilty for breaking the Warrior code, but it seems like you got away with it.\n"
-                f"Hunger: {char['hunger']}/100",
-                ephemeral=True
-            )
-
-    @discord.ui.button(label="Donate", style=discord.ButtonStyle.blurple)
-    async def donate(self, button: Button, interaction: discord.Interaction):
-        if interaction.user.id != self.user_id:
-            await interaction.response.send_message("This isn't your hunt!", ephemeral=True)
-            return
-
-        if self.user_id not in pending_hunts:
-            await interaction.response.send_message("You have no prey waiting!", ephemeral=True)
-            return
-
-        prey_info = pending_hunts.pop(self.user_id)
-        fresh_kill_piles[prey_info["clan"]].append(prey_info["prey"])
-        clan_prey_piles[prey_info["clan"]] += prey_info["value"]
-        await interaction.response.send_message(
-            f"🐾 Added **{prey_info['prey']}** to **{prey_info['clan']}Clan** fresh kill pile!",
-            ephemeral=True
-        )
-
 @bot.tree.command(name="hunt", description="Go hunting to gather food")
 async def hunt(interaction: discord.Interaction):
     uid = interaction.user.id
@@ -783,39 +718,80 @@ async def hunt(interaction: discord.Interaction):
     if not char:
         await interaction.response.send_message("❌ You don't have a character yet. Use /kit.")
         return
-
     if not char.get("clan"):
         await interaction.response.send_message("⚠️ You need to join a clan first with /clan.")
         return
 
+    # Pregnancy penalty
     preg_penalty = pregnancy_hunt_modifier(char)
+
+    # Base hunt chance
     base_success = 70 - preg_penalty
     hunger = char["hunger"]
 
-    if hunger <= 0: base_success -= 40
-    elif hunger < 20: base_success -= 20
-    elif hunger < 40: base_success -= 10
-    elif hunger >= 90: base_success -= 15
+    # Modify based on hunger
+    if hunger <= 0:
+        base_success -= 40
+    elif hunger < 20:
+        base_success -= 20
+    elif hunger < 40:
+        base_success -= 10
+    elif hunger >= 90:
+        base_success -= 15
 
     roll = random.randint(1, 100)
     success = roll <= base_success
 
-    food_gained = random.randint(5, 15)
-    if hunger < 20: food_gained = max(1, food_gained - 5)
-    elif hunger >= 70: food_gained += 2
-    if char.get("pregnant"): food_gained = max(1, food_gained - char["pregnant"]["months"] * 2)
-    char["hunger"] = max(char["hunger"] - (5 + preg_penalty), 0)
+    # Reduce hunger for effort
+    char["hunger"] = max(0, char["hunger"] - (5 + preg_penalty))
 
     if success:
         prey = random.choice(list(prey_tables[char["clan"]][season].keys()))
         value = prey_tables[char["clan"]][season][prey]
-        pending_hunts[uid] = {"prey": prey, "value": value, "clan": char["clan"]}
+
+        # Store pending hunt
+        pending_hunts[uid] = {"prey": prey, "value": value, "clan": char["clan"], "caught": False}
+
+        # Create buttons
+        view = View()
+
+        async def eat_callback(i):
+            if i.user.id != uid:
+                await i.response.send_message("This isn't your hunt!", ephemeral=True)
+                return
+            # Stealth roll
+            stealth_roll = random.randint(1, 100)
+            stealth = char.get("stats", {}).get("dexterity", 5) * 10  # dexterity ×10%
+            if stealth_roll > stealth:
+                pending_hunts[uid]["caught"] = True
+                await i.response.edit_message(content=f"❌ You were caught trying to eat the prey! You can't eat again until you age up.", view=None)
+                return
+            hunger_gain = 50
+            if char.get("pregnant"):
+                hunger_gain += char["pregnant"]["months"] * 5
+            char["hunger"] = min(char["hunger"] + hunger_gain, 100)
+            pending_hunts.pop(uid, None)
+            await i.response.edit_message(content=f"🍖 You ate the **{prey}**!\nYou feel a little guilty for breaking the Warrior code but it seems like you got away with it.\nHunger: {char['hunger']}/100", view=None)
+
+        async def donate_callback(i):
+            if i.user.id != uid:
+                await i.response.send_message("This isn't your hunt!", ephemeral=True)
+                return
+            fresh_kill_piles[char["clan"]].append(prey)
+            clan_prey_piles[char["clan"]] += value
+            pending_hunts.pop(uid, None)
+            await i.response.edit_message(content=f"🐾 Added **{prey}** to **{char['clan']}Clan** fresh kill pile!", view=None)
+
+        btn_eat = Button(label="Eat", style=discord.ButtonStyle.green)
+        btn_donate = Button(label="Donate", style=discord.ButtonStyle.blurple)
+        btn_eat.callback = eat_callback
+        btn_donate.callback = donate_callback
+        view.add_item(btn_eat)
+        view.add_item(btn_donate)
 
         await interaction.response.send_message(
-            f"🎯 **Hunt successful!** You caught a **{prey}** worth {value} points.\n"
-            f"Hunger: {char['hunger']}/100\n"
-            f"What would you like to do with your prey?",
-            view=HuntView(uid)
+            f"🎯 **Hunt successful!** You caught a **{prey}** worth {value} points.\nHunger: {char['hunger']}/100",
+            view=view
         )
     else:
         await interaction.response.send_message(
