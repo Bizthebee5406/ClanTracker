@@ -148,7 +148,59 @@ def hunting_outcome(char, base_success=70):
     if char.get("hunt_streak",0) > 3: hunger_cost += 3
     char["hunger"] = max(char["hunger"] - hunger_cost,0)
     return success, food_gained
+    
+def process_pregnancy_moon():
+    for carrier_id, data in list(pregnancies.items()):
+        if not data["active"]:
+            continue
 
+        carrier = characters.get(carrier_id)
+        if not carrier:
+            continue
+
+        # Seasonal modifier
+        season_mod = seasonal_pregnancy_modifiers.get(season, {"health_mult": 1.0, "max_kits": 4})
+
+        # Increase hunger due to pregnancy
+        carrier["hunger"] = min(100, carrier["hunger"] + 10)
+
+        # Factor in exhaustion, training, and camp quality
+        exhaustion = carrier.get("exhaustion", 0)
+        training = carrier.get("training_sessions", 0)
+        camp = camp_quality.get(carrier["clan"], 50)
+
+        base_kit_health = max(0, 100 - (exhaustion * 5 + training * 5))
+        kit_health = int(base_kit_health * season_mod["health_mult"])
+        data["kit_health_estimate"] = kit_health
+
+        # Check if pregnancy is complete
+        current_moon = carrier.get("moons", 0)
+        if current_moon - data["start_moon"] >= 5:
+            # Number of kits depends on camp + season + mother condition
+            max_kits = season_mod["max_kits"]
+            kit_count = max(1, min(max_kits, int((camp/25) * (kit_health/50))))
+            data["kit_count"] = kit_count
+
+            # Reset mother's status
+            data["active"] = False
+            carrier["hunger"] = max(carrier["hunger"] - 10, 0)
+
+            # Spawn kits
+            for _ in range(kit_count):
+                kit_stats = generate_stats()
+                kit_id = f"kit_{carrier_id}_{random.randint(1000,9999)}"
+                characters[kit_id] = {
+                    "prefix": f"{carrier['prefix']}kit",
+                    "rank": "kit",
+                    "moons": 0,
+                    "suffix": None,
+                    "clan": carrier["clan"],
+                    "health": kit_health,
+                    "stats": kit_stats,
+                    "specialty": None,
+                    "skill_value": 0,
+                    "hunger": 50
+                }
 # ----------------------- EVENTS -----------------------
 @bot.event
 async def on_ready():
@@ -183,7 +235,173 @@ async def kit(interaction: discord.Interaction, prefix: str):
         f"🐾 **{prefix}kit** has been born!\n"
         f"**Stats**:\n" + "\n".join(f"{k.capitalize()}: {v}" for k,v in stats.items())
     )
+# ----------------------- PREGNANCY SYSTEM -----------------------
+# Pregnancy rules:
+# - Full warriors, 12 moons minimum
+# - 5 moons gestation
+# - Increased hunger, affected by camp quality and mother’s activity
+# - Battle and training effectiveness reduced
+# - Mother and partner consent required
 
+def pregnancy_hunger_modifier(stage):
+    """Additional hunger per moon of pregnancy"""
+    return stage * 5  # can be adjusted
+
+def battle_penalty(stage):
+    """Multiplier for battle effectiveness depending on pregnancy stage"""
+    if stage <= 2: 
+        return 1.0  # early, no effect
+    elif stage <= 4: 
+        return 0.8  # mid
+    else: 
+        return 0.6  # late
+
+def pregnancy_effect_on_kits(mother_char, camp_quality):
+    """Determine expected kit health/number based on mother and camp"""
+    base_kits = random.randint(1, 4)
+    health_modifier = 1.0
+
+    # Reduce if camp is poor
+    if camp_quality < 50:
+        health_modifier -= 0.2
+    if mother_char.get("training_sessions", 0) > 3:
+        health_modifier -= 0.1  # overworked
+    if mother_char.get("hunger", 50) < 40:
+        health_modifier -= 0.2  # underfed
+
+    kit_health = max(1, int(100 * health_modifier))
+    return base_kits, kit_health
+
+# ---------------- PROPOSE BREEDING ----------------
+@bot.tree.command(name="propose_breeding", description="Propose breeding with another full warrior")
+async def propose_breeding(interaction: discord.Interaction, partner: discord.Member, carrier: str):
+    """
+    carrier: 'mother' or 'father' (who will carry the kits)
+    """
+    uid = interaction.user.id
+    pid = partner.id
+
+    if uid not in characters or pid not in characters:
+        await interaction.response.send_message("Both must have characters.")
+        return
+
+    mother, father = (characters[uid], characters[pid]) if carrier.lower() == "mother" else (characters[pid], characters[uid])
+
+    # Checks
+    for char in [mother, father]:
+        if char["rank"] != "warrior":
+            await interaction.response.send_message("Both characters must be full warriors.")
+            return
+        if char.get("moons", 0) < 12:
+            await interaction.response.send_message("Both characters must be at least 12 moons old.")
+            return
+        if char.get("pregnant"):
+            await interaction.response.send_message("One of the characters is already pregnant.")
+            return
+
+    # Consent check (both must agree)
+    breeding_request = {
+        "proposer": uid,
+        "partner": pid,
+        "carrier": carrier.lower()
+    }
+    pending_breeding[(uid, pid)] = breeding_request
+
+    view = View()
+
+    async def accept(i):
+        if i.user.id != pid:
+            await i.response.send_message("Only the proposed partner can accept.", ephemeral=True)
+            return
+
+        # Start pregnancy
+        mother["pregnant"] = {
+            "months": 0,
+            "partner": father["prefix"],
+            "carrier": carrier.lower(),
+            "season": season
+        }
+
+        pending_breeding.pop((uid, pid), None)
+
+        await i.response.edit_message(content=f"🌱 Pregnancy begun! **{mother['prefix']}** is carrying kits.", view=None)
+
+    async def decline(i):
+        if i.user.id != pid:
+            await i.response.send_message("Only the proposed partner can decline.", ephemeral=True)
+            return
+        pending_breeding.pop((uid, pid), None)
+        await i.response.edit_message(content="❌ Breeding proposal declined.", view=None)
+
+    btn_accept = Button(label="Accept", style=discord.ButtonStyle.green)
+    btn_decline = Button(label="Decline", style=discord.ButtonStyle.red)
+    btn_accept.callback = accept
+    btn_decline.callback = decline
+    view.add_item(btn_accept)
+    view.add_item(btn_decline)
+
+    await interaction.response.send_message(
+        f"🌱 **{characters[uid]['prefix']}** proposes breeding to **{characters[pid]['prefix']}**.\n"
+        f"Carrier: {carrier.lower()}. Does {characters[pid]['prefix']} agree?",
+        view=view
+    )
+# ---------------- PREGNANCY STATUS ----------------
+@bot.tree.command(name="pregnancy_status", description="Check pregnancy progress")
+async def pregnancy_status(interaction: discord.Interaction):
+    uid = interaction.user.id
+    char = characters.get(uid)
+
+    if not char or not char.get("pregnant"):
+        await interaction.response.send_message("You are not pregnant.")
+        return
+
+    months = char["pregnant"]["months"]
+    carrier = char["pregnant"]["carrier"]
+    stage_msg = f"🌱 Month {months+1} of 5. Carrier: {carrier}"
+
+    suggestions = []
+    if char["hunger"] < 60:
+        suggestions.append("Eat more to support your kits.")
+    if char.get("training_sessions", 0) > 2:
+        suggestions.append("Avoid overtraining to keep kits healthy.")
+    if camp_quality[char["clan"]] < 50:
+        suggestions.append("Help improve camp quality to benefit kit health.")
+
+    suggestion_msg = "\n".join(suggestions) if suggestions else "You're doing well. Keep resting and eating!"
+
+    await interaction.response.send_message(
+        f"{stage_msg}\n\n💡 Suggestions:\n{suggestion_msg}"
+    )
+
+# ---------------- UPDATE COMMANDS TO INCLUDE PREGNANCY EFFECT ----------------
+# Example: battle_effect
+def apply_pregnancy_effects(char, context="battle"):
+    if not char.get("pregnant"):
+        return 1.0  # no penalty
+
+    stage = char["pregnant"]["months"]
+    if context == "battle":
+        return battle_penalty(stage)
+    return 1.0
+
+# Example usage in battle:
+# damage = int(base_damage * apply_pregnancy_effects(attacker_char))
+
+# ---------------- UPDATE HUNTING ----------------
+def pregnancy_hunt_modifier(char):
+    if not char.get("pregnant"):
+        return 0
+    stage = char["pregnant"]["months"]
+    return stage * 2  # more hunger per stage
+
+# Example usage: char["hunger"] -= base_hunger_cost + pregnancy_hunt_modifier(char)
+
+# ---------------- UPDATE TRAINING ----------------
+def pregnancy_train_allowed(char):
+    if not char.get("pregnant"):
+        return True
+    stage = char["pregnant"]["months"]
+    return stage <= 2  # only early pregnancy allows light training
 # ----------------------- AGE COMMAND -----------------------
 @bot.tree.command(name="age", description="Age your character by one moon.")
 async def age(interaction: discord.Interaction):
