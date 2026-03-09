@@ -394,29 +394,57 @@ async def age(interaction: discord.Interaction):
     char["training_sessions"] = 0
     char["exhaustion"] = 0
 
-    # Check if kit becomes apprentice at 6 moons
-    apprentice_msg = ""
+    # Promotion: Kit → Apprentice at 6 moons
+    promotion_msg = ""
     if char["rank"] == "kit" and char.get("moons", 0) >= 6:
         char["rank"] = "apprentice"
-        apprentice_msg = f"🌟 {char['prefix']} has grown into an apprentice!"
+        char["suffix"] = "paw"  # update suffix to 'paw'
+        promotion_msg = f"🌟 {char['prefix']} has grown into an apprentice and now has the suffix 'paw'!"
 
     # Hunger warnings
-    msg = ""
+    hunger_msg = ""
     if char["hunger"] <= 0:
         char["alive"] = False
         await interaction.response.send_message(f"💀 {char['prefix']} has starved to death.")
         return
     elif char["hunger"] < 20:
-        msg = "⚠️ You are starving and need to eat soon!"
+        hunger_msg = "⚠️ You are starving and need to eat soon!"
 
-    if apprentice_msg:
-        msg += f"\n{apprentice_msg}"
+    # Combine messages
+    final_msg = "\n".join(filter(None, [hunger_msg, promotion_msg]))
 
     await interaction.response.send_message(
         f"🌙 {char['prefix']} ages one moon.\n"
         f"Age: {char['moons']} moons\n"
         f"Hunger -10 → {char['hunger']}\n"
-        f"{msg}"
+        f"{final_msg}"
+    )
+    
+@bot.tree.command(name="choose_suffix", description="Choose your future warrior suffix")
+async def choose_suffix(interaction: discord.Interaction, suffix: str):
+    uid = interaction.user.id
+    char = characters.get(uid)
+
+    if not char:
+        await interaction.response.send_message("❌ You don't have a character.")
+        return
+
+    if char["rank"] != "apprentice":
+        await interaction.response.send_message("⚠️ Only apprentices can choose a warrior suffix.")
+        return
+
+    # Clean suffix input
+    suffix = suffix.lower().strip()
+
+    # Prevent paw suffix
+    if suffix == "paw":
+        await interaction.response.send_message("⚠️ You cannot choose 'paw' as a warrior suffix.")
+        return
+
+    char["future_suffix"] = suffix
+
+    await interaction.response.send_message(
+        f"🌟 Your future warrior name will be **{char['prefix']}{suffix}** when you are promoted."
     )
 # ----------------------- PREYPILE COMMAND -----------------------
 from discord.ui import View, Button
@@ -471,6 +499,46 @@ async def preypile(interaction: discord.Interaction):
         f"Your hunger is now **{char['hunger']}/100**\n"
         f"🏕 Camp quality slightly decreased: **{camp_quality[clan]}**"
     )
+
+@bot.tree.command(name="make_warrior", description="Promote an apprentice to warrior")
+async def make_warrior(interaction: discord.Interaction, member: discord.Member):
+    uid = member.id
+    char = characters.get(uid)
+
+    if not char:
+        await interaction.response.send_message("❌ That user doesn't have a character.")
+        return
+
+    if char["rank"] != "apprentice":
+        await interaction.response.send_message("⚠️ Only apprentices can be promoted.")
+        return
+
+    suffix = char.get("future_suffix")
+    if not suffix:
+        await interaction.response.send_message("⚠️ That apprentice has not chosen a warrior suffix yet.")
+        return
+
+    clan = char.get("clan", "Unknown")
+
+    # Promote the apprentice
+    char["rank"] = "warrior"
+    char["suffix"] = suffix
+    char.pop("future_suffix", None)
+
+    apprentice_name = f"{char['prefix']}paw"
+    warrior_name = f"{char['prefix']}{suffix}"
+
+    ceremony = (
+        "🌟 **Warrior Ceremony** 🌟\n\n"
+        "Let all cats old enough to catch their own prey join for a clan meeting.\n\n"
+        f"I, leader of **{clan}Clan**, call upon my warrior ancestors to look down on this apprentice.\n\n"
+        f"**{apprentice_name}**, you have trained hard and proven yourself loyal and brave.\n\n"
+        f"From this moment forward, you will be known as **{warrior_name}**.\n\n"
+        f"StarClan honors your courage and welcomes you as a full warrior of **{clan}Clan**!\n\n"
+        f"🎉 Everyone chant **{warrior_name}! {warrior_name}! {warrior_name}!**"
+    )
+
+    await interaction.response.send_message(ceremony)
 # ----------------------- TAKE PREY -----------------------
 from discord.ui import View, Button
 
