@@ -454,43 +454,57 @@ async def preypile(interaction: discord.Interaction):
         f"🏕 Camp quality slightly decreased: **{camp_quality[clan]}**"
     )
 # ----------------------- TAKE PREY -----------------------
+from discord.ui import View, Button
+
 @bot.tree.command(name="take_prey", description="Take prey from your clan's fresh kill pile")
 async def take_prey(interaction: discord.Interaction):
     uid = interaction.user.id
 
-    if uid not in characters:
+    # Ensure the user has a character
+    char = characters.get(uid)
+    if not char:
         await interaction.response.send_message("❌ You don't have a character yet! Use /kit.")
         return
 
-    char = characters[uid]
-
-    if not char.get("clan"):
+    # Ensure the character has a clan
+    clan = char.get("clan")
+    if not clan:
         await interaction.response.send_message("⚠️ Join a clan first with /clan.")
         return
 
-    clan = char["clan"]
+    # Ensure fresh kill pile exists
+    pile = fresh_kill_piles.get(clan)
+    if pile is None:
+        fresh_kill_piles[clan] = []
+        pile = fresh_kill_piles[clan]
 
-    if not fresh_kill_piles.get(clan) or len(fresh_kill_piles[clan]) == 0:
-        await interaction.response.send_message("The fresh kill pile is empty!")
+    # If empty, provide starter prey
+    if not pile:
+        starter_prey = ["mouse", "rabbit", "vole"]
+        pile.extend(starter_prey)
+        await interaction.response.send_message(
+            f"🐾 The fresh kill pile was empty. Added starter prey: {', '.join(starter_prey)}."
+        )
         return
 
-    # Pop the first prey
-    prey = fresh_kill_piles[clan].pop(0)
+    # Take the first prey
+    prey = pile.pop(0)
 
     # Base hunger gain
     hunger_gain = 40
 
-    # Extra hunger needed if pregnant
+    # Extra nourishment if pregnant
     if char.get("pregnant"):
         stage = char["pregnant"].get("months", 0)
-        # Later months give more hunger
-        hunger_gain += stage * 5
+        hunger_gain += stage * 5  # More for kits
 
-    char["hunger"] = min(char["hunger"] + hunger_gain, 100)
+    # Update hunger safely
+    char["hunger"] = min(char.get("hunger", 50) + hunger_gain, 100)
 
-    # Slightly reduce camp quality
-    camp_quality[clan] = max(0, camp_quality[clan] - 2)
+    # Reduce camp quality safely
+    camp_quality[clan] = max(0, camp_quality.get(clan, 50) - 2)
 
+    # Send feedback message
     await interaction.response.send_message(
         f"🍖 You take a **{prey}** from the fresh kill pile and eat it.\n"
         f"Your hunger is now **{char['hunger']}/100**\n"
