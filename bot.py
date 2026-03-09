@@ -416,9 +416,10 @@ async def take_prey(interaction: discord.Interaction):
         f"🍖 You take a **{prey}** from the fresh kill pile and eat it.\n"
         f"Your hunger is now **{char['hunger']}**."
     )
-    # ----------------- Battle Imports -----------------
-from discord.ui import View, Button
+        # ----------------- Battle Imports -----------------
 import discord
+from discord.ui import View, Button
+import random
 
 # ---------------- GLOBAL STATE ----------------
 battle_state = {}
@@ -430,59 +431,26 @@ MOVES = {
         {"name": "Claw Swipe", "type": "physical", "damage": 15},
         {"name": "Pounce", "type": "physical", "damage": 20},
         {"name": "Roar", "type": "status", "buff": {"defense_up": 1, "attack_down": 1}},
-        {"name": "Charge Strike", "type": "charge", "damage": 35, "charge_turns": 2},
+        {"name": "Charge Strike", "type": "charge", "damage": 35}
     ],
     "River": [
         {"name": "Water Slash", "type": "physical", "damage": 15},
-        {"name": "Dive Attack", "type": "charge", "damage": 30, "charge_turns": 2},
-        {"name": "Soothing Ripple", "type": "status", "buff": {"heal": 10}},
+        {"name": "Dive Attack", "type": "charge", "damage": 30},
+        {"name": "Soothing Ripple", "type": "status", "buff": {"heal": 10}}
     ],
     "Shadow": [
         {"name": "Shadow Pounce", "type": "physical", "damage": 20},
-        {"name": "Stealth Strike", "type": "status", "buff": {"attack_up": 2}},
+        {"name": "Stealth Strike", "type": "status", "buff": {"attack_up": 2}}
     ],
     "Wind": [
         {"name": "Gale Swipe", "type": "physical", "damage": 15},
-        {"name": "Whirlwind", "type": "charge", "damage": 25, "charge_turns": 1},
-        {"name": "Endurance Boost", "type": "status", "buff": {"defense_up": 2}},
+        {"name": "Whirlwind", "type": "charge", "damage": 25},
+        {"name": "Endurance Boost", "type": "status", "buff": {"defense_up": 2}}
     ]
 }
 
-@bot.tree.command(name="attack", description="Challenge another player to battle")
-async def attack(interaction: discord.Interaction, opponent: discord.Member):
-
-    attacker_id = interaction.user.id
-    defender_id = opponent.id
-
-    attacker_char = characters.get(attacker_id)
-    defender_char = characters.get(defender_id)
-
-    if not attacker_char or not defender_char:
-        await interaction.response.send_message("❌ One of you doesn't have a character.")
-        return
-
-    if attacker_char["hunger"] < 10:
-        await interaction.response.send_message(
-            f"🥀 {attacker_char['prefix']} is too hungry to fight!"
-        )
-        return
-
-    battle_state[(attacker_id, defender_id)] = {
-        "attacker": attacker_char,
-        "defender": defender_char,
-        "turn": "attacker"
-    }
-
-    # RESPOND FIRST
-    await interaction.response.send_message(
-        f"⚔️ **{attacker_char['prefix']}** challenges **{defender_char['prefix']}** to battle!"
-    )
-
-    # THEN show move menu
-    await prompt_move(interaction, attacker_id, defender_id)
-
 # ---------------- HUNGER MODIFIER ----------------
-def hunger_modifier_battle(hunger):
+def hunger_modifier(hunger):
     if hunger < 30:
         return -5
     elif hunger < 50:
@@ -494,78 +462,76 @@ def hunger_modifier_battle(hunger):
     else:
         return -3
 
-# ---------------- START BATTLE ----------------
-async def start_battle(interaction, opponent):
+
+# ---------------- ATTACK COMMAND ----------------
+@bot.tree.command(name="attack", description="Challenge someone to battle")
+async def attack(interaction: discord.Interaction, opponent: discord.Member):
 
     uid = interaction.user.id
     oid = opponent.id
-    attacker = characters[uid]
 
-    # Hunger warning
-    if attacker["hunger"] < 20:
+    if uid == oid:
+        await interaction.response.send_message("❌ You cannot fight yourself.")
+        return
 
-        view = View()
+    attacker = characters.get(uid)
+    defender = characters.get(oid)
 
-        async def confirm(i):
-            await i.response.edit_message(
-                content="⚠️ You fight despite hunger!",
-                view=None
-            )
-            await initiate_battle(i, opponent)
+    if not attacker or not defender:
+        await interaction.response.send_message("❌ One of you doesn't have a character.")
+        return
 
-        async def cancel(i):
-            await i.response.edit_message(
-                content="Battle cancelled due to hunger.",
-                view=None
-            )
-
-        btn_yes = Button(label="Fight Anyway", style=discord.ButtonStyle.green)
-        btn_no = Button(label="Cancel", style=discord.ButtonStyle.red)
-
-        btn_yes.callback = confirm
-        btn_no.callback = cancel
-
-        view.add_item(btn_yes)
-        view.add_item(btn_no)
-
+    if attacker["hunger"] < 10:
         await interaction.response.send_message(
-            "⚠️ You are very hungry! Fight anyway?",
-            view=view
+            f"🥀 {attacker['prefix']} is too hungry to fight!"
         )
         return
 
-    await initiate_battle(interaction, opponent)
-
-# ---------------- INITIATE BATTLE ----------------
-async def initiate_battle(interaction, opponent):
-
-    uid = interaction.user.id
-    oid = opponent.id
-
-    pending_battles[oid] = {"attacker": uid}
-
-    battle_state[(uid, oid)] = {
-        "turn": "attacker",
-        "charge": {}
-    }
+    pending_battles[oid] = uid
 
     view = View()
 
     async def accept(i):
-        await i.response.edit_message(content="⚔️ Battle accepted!", view=None)
-        await prompt_move(i, uid, oid)
+
+        if i.user.id != oid:
+            await i.response.send_message(
+                "❌ Only the challenged player can accept.",
+                ephemeral=True
+            )
+            return
+
+        battle_state[(uid, oid)] = {
+            "attacker": uid,
+            "defender": oid,
+            "turn": uid,
+            "charge": {}
+        }
+
+        await i.response.edit_message(
+            content="⚔️ Battle accepted!",
+            view=None
+        )
+
+        await prompt_turn(i, uid, oid)
 
     async def decline(i):
+
+        if i.user.id != oid:
+            await i.response.send_message(
+                "❌ Only the challenged player can decline.",
+                ephemeral=True
+            )
+            return
+
         pending_battles.pop(oid, None)
-        battle_state.pop((uid, oid), None)
 
         await i.response.edit_message(
             content="❌ Battle declined.",
             view=None
         )
 
-    btn_accept = Button(label="Accept Battle", style=discord.ButtonStyle.green)
-    btn_decline = Button(label="Decline Battle", style=discord.ButtonStyle.red)
+    btn_accept = Button(label="Accept", style=discord.ButtonStyle.green)
+    btn_decline = Button(label="Decline", style=discord.ButtonStyle.red)
 
     btn_accept.callback = accept
     btn_decline.callback = decline
@@ -573,141 +539,64 @@ async def initiate_battle(interaction, opponent):
     view.add_item(btn_accept)
     view.add_item(btn_decline)
 
-    await interaction.followup.send(
-        f"⚔️ **{characters[uid]['prefix']}** has challenged **{opponent.display_name}**!",
+    await interaction.response.send_message(
+        f"⚔️ **{attacker['prefix']}** challenges **{defender['prefix']}**!",
         view=view
     )
 
-# ---------------- PROMPT MOVE ----------------
-async def prompt_move(interaction, attacker_id, defender_id):
-async def prompt_move(interaction, attacker_id, defender_id):
-    battle = battle_state.get((attacker_id, defender_id))
 
-    if not battle:
-        await interaction.followup.send("⚠️ Battle not found.")
-        return
-
-    attacker = battle["attacker"]
-    defender = battle["defender"]
-
-    class MoveView(discord.ui.View):
-        def __init__(self):
-            super().__init__(timeout=60)
-
-        @discord.ui.button(label="Strike", style=discord.ButtonStyle.red)
-        async def strike(self, button_interaction: discord.Interaction, button: discord.ui.Button):
-            if button_interaction.user.id != attacker_id:
-                await button_interaction.response.send_message(
-                    "❌ It's not your turn.", ephemeral=True
-                )
-                return
-
-            damage = random.randint(8, 15)
-
-            # Hunger weakness modifier
-            if attacker["hunger"] < 20:
-                damage = int(damage * 0.7)
-
-            defender["health"] -= damage
-
-            await button_interaction.response.send_message(
-                f"⚔️ **{attacker['prefix']}** strikes **{defender['prefix']}** for **{damage} damage!**"
-            )
-
-            if defender["health"] <= 0:
-                await button_interaction.followup.send(
-                    f"💀 **{defender['prefix']}** has been defeated!"
-                )
-                del battle_state[(attacker_id, defender_id)]
-                return
-
-            await prompt_move(button_interaction, defender_id, attacker_id)
-
-        @discord.ui.button(label="Heavy Strike", style=discord.ButtonStyle.blurple)
-        async def heavy_strike(self, button_interaction: discord.Interaction, button: discord.ui.Button):
-            if button_interaction.user.id != attacker_id:
-                await button_interaction.response.send_message(
-                    "❌ It's not your turn.", ephemeral=True
-                )
-                return
-
-            damage = random.randint(15, 25)
-
-            if attacker["hunger"] < 20:
-                damage = int(damage * 0.6)
-
-            defender["health"] -= damage
-
-            await button_interaction.response.send_message(
-                f"💥 **{attacker['prefix']}** unleashes a **Heavy Strike** for **{damage} damage!**"
-            )
-
-            if defender["health"] <= 0:
-                await button_interaction.followup.send(
-                    f"💀 **{defender['prefix']}** has been defeated!"
-                )
-                del battle_state[(attacker_id, defender_id)]
-                return
-
-            await prompt_move(button_interaction, defender_id, attacker_id)
-
-        @discord.ui.button(label="Flee", style=discord.ButtonStyle.gray)
-        async def flee(self, button_interaction: discord.Interaction, button: discord.ui.Button):
-            if button_interaction.user.id != attacker_id:
-                await button_interaction.response.send_message(
-                    "❌ You can't flee from someone else's battle.", ephemeral=True
-                )
-                return
-
-            await button_interaction.response.send_message(
-                f"🏃 **{attacker['prefix']}** flees from battle!"
-            )
-
-            del battle_state[(attacker_id, defender_id)]
-
-    view = MoveView()
-
-    await interaction.followup.send(
-        f"⚔️ **{attacker['prefix']}'s turn!**\nChoose your move:",
-        view=view
-    )
 # ---------------- PROMPT TURN ----------------
 async def prompt_turn(interaction, attacker_id, defender_id):
 
-    battle = battle_state[(attacker_id, defender_id)]
+    battle = battle_state.get((attacker_id, defender_id))
 
-    turn_id = attacker_id if battle["turn"] == "attacker" else defender_id
+    if not battle:
+        return
+
+    turn_id = battle["turn"]
     char = characters[turn_id]
 
     moves = MOVES.get(char["clan"], [])
 
-    view = View()
+    view = View(timeout=60)
 
     for move in moves:
 
-        async def move_callback(i, move=move):
-            await execute_move(i, attacker_id, defender_id, turn_id, move)
+        async def callback(i, move=move):
+
+            if i.user.id != turn_id:
+                await i.response.send_message(
+                    "❌ It's not your turn.",
+                    ephemeral=True
+                )
+                return
+
+            await execute_move(i, attacker_id, defender_id, move)
 
         btn = Button(label=move["name"], style=discord.ButtonStyle.blurple)
-        btn.callback = move_callback
-
+        btn.callback = callback
         view.add_item(btn)
 
     await interaction.followup.send(
-        f"🎯 {char['prefix']}'s turn! Choose a move:",
+        f"🎯 **{char['prefix']}**'s turn!",
         view=view
     )
 
+
 # ---------------- EXECUTE MOVE ----------------
-async def execute_move(interaction, attacker_id, defender_id, turn_id, move):
+async def execute_move(interaction, attacker_id, defender_id, move):
 
     battle = battle_state[(attacker_id, defender_id)]
 
-    attacker_char = characters[turn_id]
-    defender_id_actual = defender_id if turn_id == attacker_id else attacker_id
-    defender_char = characters[defender_id_actual]
+    turn_id = battle["turn"]
+    enemy_id = defender_id if turn_id == attacker_id else attacker_id
 
-    # Charge move
+    attacker = characters[turn_id]
+    defender = characters[enemy_id]
+
+    result = ""
+
+    # -------- Charge Moves --------
     if move["type"] == "charge":
 
         charge = battle["charge"].get(turn_id)
@@ -715,66 +604,61 @@ async def execute_move(interaction, attacker_id, defender_id, turn_id, move):
         if charge:
             damage = move["damage"]
 
-            defender_char["health"] = max(
-                defender_char["health"] - damage,
-                0
-            )
+            defender["health"] = max(defender["health"] - damage, 0)
 
             battle["charge"].pop(turn_id)
 
-            result = f"💥 {attacker_char['prefix']} unleashes **{move['name']}** for {damage} damage!"
+            result = f"💥 {attacker['prefix']} unleashes **{move['name']}** for {damage} damage!"
 
         else:
             battle["charge"][turn_id] = move
-            result = f"⚡ {attacker_char['prefix']} begins charging **{move['name']}**!"
+            result = f"⚡ {attacker['prefix']} begins charging **{move['name']}**!"
 
+    # -------- Status Moves --------
     elif move["type"] == "status":
 
         buffs = move.get("buff", {})
 
         if "heal" in buffs:
-            attacker_char["health"] = min(
-                attacker_char["health"] + buffs["heal"],
-                100
-            )
+            attacker["health"] = min(attacker["health"] + buffs["heal"], 100)
 
-        result = f"✨ {attacker_char['prefix']} uses **{move['name']}**!"
+        result = f"✨ {attacker['prefix']} uses **{move['name']}**!"
 
+    # -------- Physical Moves --------
     else:
 
-        damage = move.get("damage", 10) + hunger_modifier_battle(attacker_char["hunger"])
+        damage = move["damage"] + hunger_modifier(attacker["hunger"])
 
-        defender_char["health"] = max(
-            defender_char["health"] - damage,
-            0
-        )
+        damage = max(1, damage)
 
-        result = f"💥 {attacker_char['prefix']} hits for **{damage} damage**!"
+        defender["health"] = max(defender["health"] - damage, 0)
 
-    # Switch turn
-    battle["turn"] = "defender" if battle["turn"] == "attacker" else "attacker"
+        result = f"💥 {attacker['prefix']} uses **{move['name']}** for **{damage} damage**!"
+
+    # -------- Switch Turn --------
+    battle["turn"] = enemy_id
 
     await interaction.response.send_message(
         f"{result}\n"
-        f"❤️ {attacker_char['prefix']} HP: {attacker_char['health']}\n"
-        f"❤️ {defender_char['prefix']} HP: {defender_char['health']}"
+        f"❤️ {attacker['prefix']} HP: {attacker['health']}\n"
+        f"❤️ {defender['prefix']} HP: {defender['health']}"
     )
 
-    # Battle end
-    if attacker_char["health"] <= 0 or defender_char["health"] <= 0:
+    # -------- Check Victory --------
+    if attacker["health"] <= 0 or defender["health"] <= 0:
 
-        winner = attacker_char if attacker_char["health"] > 0 else defender_char
-        loser = defender_char if winner == attacker_char else attacker_char
+        winner = attacker if attacker["health"] > 0 else defender
+        loser = defender if winner == attacker else attacker
 
         battle_state.pop((attacker_id, defender_id), None)
-        pending_battles.pop(defender_id, None)
 
         await interaction.followup.send(
             f"🏆 **{winner['prefix']}** wins! **{loser['prefix']}** is defeated."
         )
 
-    else:
-        await prompt_move(interaction, attacker_id, defender_id)
+        return
+
+    await prompt_turn(interaction, attacker_id, defender_id)
 # ----------------- Camp Maintenance -----------------
 #
 @bot.tree.command(name="maintain_camp", description="Help maintain the camp")
