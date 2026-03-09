@@ -787,23 +787,136 @@ async def eat(interaction: discord.Interaction):
     if char.get("pregnant"):
         # Pregnant cats need more food
         hunger_gain += char["pregnant"]["months"] * 5
-    char["hunger"] = min(char["hunger"] + hunger_gain, 100)
+    char["hunger"] = min(char["hunger"] +from discord.ui import View, Button
 
-    await interaction.response.send_message(
-        f"🍖 You ate the **{prey_info['prey']}**!\n"
-        f"Your hunger is now **{char['hunger']}/100**"
-    )
-    
-@bot.tree.command(name="donate", description="Add prey to clan pile")
-async def donate(interaction: discord.Interaction):
+@bot.tree.command(name="hunt", description="Go hunting to gather food")
+async def hunt(interaction: discord.Interaction):
     uid = interaction.user.id
-    if uid not in pending_hunts:
-        await interaction.response.send_message("You have no prey waiting. Go hunt first!")
+    char = characters.get(uid)
+    
+    if not char:
+        await interaction.response.send_message("❌ You don't have a character yet. Use /kit.")
         return
-    prey_info = pending_hunts.pop(uid)
-    fresh_kill_piles[prey_info["clan"]].append(prey_info["prey"])
-    clan_prey_piles[prey_info["clan"]] += prey_info["value"]
-    await interaction.response.send_message(f"🐾 Added **{prey_info['prey']}** to **{prey_info['clan']}Clan** fresh kill pile!")
+    
+    if not char.get("clan"):
+        await interaction.response.send_message("⚠️ You need to join a clan first with /clan.")
+        return
+
+    # Pregnancy check: harder to hunt if pregnant
+    preg_penalty = pregnancy_hunt_modifier(char)
+
+    # Base hunt success chance
+    base_success = 70 - preg_penalty
+    hunger = char["hunger"]
+
+    # Modify success based on hunger
+    if hunger <= 0:
+        base_success -= 40
+    elif hunger < 20:
+        base_success -= 20
+    elif hunger < 40:
+        base_success -= 10
+    elif hunger >= 90:
+        base_success -= 15
+
+    # Random roll
+    roll = random.randint(1, 100)
+    success = roll <= base_success
+
+    # Determine food gained
+    food_gained = random.randint(5, 15)
+    if hunger < 20:
+        food_gained = max(1, food_gained - 5)
+    elif hunger >= 70:
+        food_gained += 2
+
+    # Reduce food if pregnant
+    if char.get("pregnant"):
+        food_gained = max(1, food_gained - char["pregnant"]["months"] * 2)
+
+    # Reduce hunger for effort
+    hunger_cost = 5 + preg_penalty
+    char["hunger"] = max(char["hunger"] - hunger_cost, 0)
+
+    if success:
+        prey = random.choice(list(prey_tables[char["clan"]][season].keys()))
+        value = prey_tables[char["clan"]][season][prey]
+
+        pending_hunts[uid] = {"prey": prey, "value": value, "clan": char["clan"]}
+
+        # Create buttons for Eat and Donate
+        view = View()
+
+        async def eat_button(interact):
+            # Use the new risk/reward eat mechanic
+            if uid not in pending_hunts:
+                await interact.response.send_message("You have no prey waiting!", ephemeral=True)
+                return
+
+            prey_info = pending_hunts.pop(uid)
+
+            # Check if already eaten illegally
+            if char.get("illegal_eat"):
+                await interact.response.send_message(
+                    "⚠️ You've already eaten extra prey this moon! Wait until you age to eat again.",
+                    ephemeral=True
+                )
+                return
+
+            # Stealth roll
+            stealth_roll = char["stats"]["dexterity"] + char["stats"]["luck"]
+            caught_roll = random.randint(1, 20)
+
+            if stealth_roll < caught_roll:
+                char["illegal_eat"] = True
+                await interact.response.send_message(
+                    f"❌ You tried to eat the **{prey_info['prey']}**, but were caught by clan elders!\n"
+                    f"You can't eat any more extra prey until you age up.",
+                    ephemeral=True
+                )
+            else:
+                hunger_gain = 50
+                if char.get("pregnant"):
+                    hunger_gain += char["pregnant"]["months"] * 5
+                char["hunger"] = min(char["hunger"] + hunger_gain, 100)
+
+                await interact.response.send_message(
+                    f"🍖 You ate the **{prey_info['prey']}**.\n"
+                    f"You feel a little guilty for breaking the Warrior code, but it seems like you got away with it.\n"
+                    f"Hunger: {char['hunger']}/100",
+                    ephemeral=True
+                )
+
+        async def donate_button(interact):
+            if uid not in pending_hunts:
+                await interact.response.send_message("You have no prey waiting!", ephemeral=True)
+                return
+            prey_info = pending_hunts.pop(uid)
+            fresh_kill_piles[prey_info["clan"]].append(prey_info["prey"])
+            clan_prey_piles[prey_info["clan"]] += prey_info["value"]
+            await interact.response.send_message(
+                f"🐾 Added **{prey_info['prey']}** to **{prey_info['clan']}Clan** fresh kill pile!",
+                ephemeral=True
+            )
+
+        btn_eat = Button(label="Eat", style=discord.ButtonStyle.green)
+        btn_donate = Button(label="Donate", style=discord.ButtonStyle.blurple)
+        btn_eat.callback = eat_button
+        btn_donate.callback = donate_button
+        view.add_item(btn_eat)
+        view.add_item(btn_donate)
+
+        await interaction.response.send_message(
+            f"🎯 **Hunt successful!** You caught a **{prey}** worth {value} points.\n"
+            f"Hunger: {char['hunger']}/100\n"
+            f"What would you like to do with your prey?",
+            view=view
+        )
+
+    else:
+        await interaction.response.send_message(
+            f"❌ Hunt failed. No prey this time.\nHunger: {char['hunger']}/100"
+            )
 # ----------------------- MEDICINE CAT -----------------------
 @bot.tree.command(name="see_medicine_cat", description="Heal yourself via medicine cat")
 async def see_medicine_cat(interaction: discord.Interaction):
