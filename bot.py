@@ -86,7 +86,10 @@ MOVES = {
 # ----------------------- UTILITY FUNCTIONS -----------------------
 def generate_stats():
     return {stat: random.randint(0, 10) for stat in ["strength","perception","dexterity","speed","intelligence","luck","charisma"]}
-
+    
+def get_full_name(char):
+    return f"{char['prefix']}{char.get('suffix','')}"
+    
 def check_for_apprentice(uid):
     char = characters[uid]
     if char["rank"] == "kit" and char.get("moons", 0) >= 6:
@@ -608,7 +611,9 @@ async def profile(interaction: discord.Interaction):
         await interaction.response.send_message("❌ You don't have a character yet. Use /kit.")
         return
 
+    # Automatically build name
     name = f"{char['prefix']}{char.get('suffix','')}"
+
     rank = char.get("rank", "unknown")
     clan = char.get("clan", "None")
     moons = char.get("moons", 0)
