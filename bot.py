@@ -229,26 +229,6 @@ async def on_ready():
     races="Races score",
     class_score="Class score"
 )
-async def add(
-    interaction: discord.Interaction,
-    member: discord.Member,
-    rank: str,
-    charactername: str,
-    warmups: int,
-    formations: int,
-    races: int,
-    class_score: int
-):
-
-    output = (
-        f"**{rank}** {member.mention} ``({charactername})``\n"
-        f"Warmups: {warmups}\n"
-        f"Formations: {formations}\n"
-        f"Races: {races}\n"
-        f"Class: {class_score}"
-    )
-
-    await interaction.response.send_message(output)
 # ----------------------- CHARACTER CREATION -----------------------
 @bot.tree.command(name="kit", description="Create your kit")
 async def kit(interaction: discord.Interaction, prefix: str):
