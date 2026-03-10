@@ -218,17 +218,6 @@ async def on_ready():
     synced = await bot.tree.sync()
     print(f"Synced {len(synced)} commands globally")
     print(f"{bot.user} is online!")
-
-@bot.tree.command(name="add", description="Add training scores for a member")
-@app_commands.describe(
-    member="The member you're scoring",
-    rank="The rank of the character",
-    charactername="The character's name",
-    warmups="Warmups score",
-    formations="Formations score",
-    races="Races score",
-    class_score="Class score"
-)
 # ----------------------- CHARACTER CREATION -----------------------
 @bot.tree.command(name="kit", description="Create your kit")
 async def kit(interaction: discord.Interaction, prefix: str):
