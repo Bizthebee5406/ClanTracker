@@ -641,51 +641,82 @@ async def profile(interaction: discord.Interaction):
     # Hunger message
     hunger = char["hunger"]
     if hunger >= 90:
-        hunger_msg = "🟢 Well fed"
+        hunger_msg = "Well Fed"
     elif hunger >= 70:
-        hunger_msg = "🙂 Content"
+        hunger_msg = "Content"
     elif hunger >= 40:
-        hunger_msg = "😐 Getting hungry"
+        hunger_msg = "Hungry"
     elif hunger >= 20:
-        hunger_msg = "⚠️ Very hungry"
+        hunger_msg = "Very Hungry"
     else:
-        hunger_msg = "🚨 Starving!"
+        hunger_msg = "Starving"
 
     # Health message
     health = char["health"]
     if health >= 80:
-        health_msg = "🟢 Healthy"
+        health_msg = "Healthy"
     elif health >= 50:
-        health_msg = "🟡 Slightly injured"
+        health_msg = "Minor Injuries"
     elif health >= 25:
-        health_msg = "⚠️ Injured - visit a medicine cat"
+        health_msg = "Injured – See a Medicine Cat"
     else:
-        health_msg = "🚨 Critical - see a medicine cat immediately!"
+        health_msg = "Critical – Medicine Cat Needed"
 
-    # Pregnancy info
-    preg_text = "None"
+    # Pregnancy text
+    pregnancy_text = "None"
     if char.get("pregnant"):
-        preg = char["pregnant"]
-        preg_text = f"{preg['months']}/5 moons pregnant"
+        pregnancy_text = f"{char['pregnant']['months']}/5 moons pregnant"
 
-    await interaction.response.send_message(
-        f"🐾 **{char['prefix']} ({interaction.user.display_name})**\n\n"
-        f"Clan: {char.get('clan','None')}\n"
-        f"Age: {char['age']} moons\n"
-        f"Pregnancy: {preg_text}\n\n"
+    # Rank display
+    rank = char.get("rank", "Cat")
 
-        f"❤️ Health: {health}/100 — {health_msg}\n"
-        f"🍗 Hunger: {hunger}/100 — {hunger_msg}\n\n"
-
-        f"**Stats**\n"
-        f"💪 Strength: {char.get('strength',0)}\n"
-        f"🤸 Dexterity: {char.get('dexterity',0)}\n"
-        f"💨 Speed: {char.get('speed',0)}\n"
-        f"👀 Perception: {char.get('perception',0)}\n"
-        f"🧠 Intelligence: {char.get('intelligence',0)}\n"
-        f"🍀 Luck: {char.get('luck',0)}\n"
-        f"✨ Charisma: {char.get('charisma',0)}"
+    embed = discord.Embed(
+        title=f"🐾 {char['prefix']}",
+        description=f"{rank} of **{char.get('clan','No Clan')}Clan**",
+        color=discord.Color.green()
     )
+
+    # Basic info
+    embed.add_field(
+        name="Basic Info",
+        value=(
+            f"Age: **{char['age']} moons**\n"
+            f"Hunger: **{char['hunger']}/100** ({hunger_msg})\n"
+            f"Health: **{char['health']}/100** ({health_msg})\n"
+            f"Pregnancy: **{pregnancy_text}**\n"
+            f"Status: **Alive 🐾**"
+        ),
+        inline=False
+    )
+
+    # Stats (using the stats your system actually has)
+    embed.add_field(
+        name="📊 Stats",
+        value=(
+            f"Strength: **{char.get('strength',0)}**\n"
+            f"Dexterity: **{char.get('dexterity',0)}**\n"
+            f"Speed: **{char.get('speed',0)}**\n"
+            f"Perception: **{char.get('perception',0)}**\n"
+            f"Intelligence: **{char.get('intelligence',0)}**\n"
+            f"Luck: **{char.get('luck',0)}**\n"
+            f"Charisma: **{char.get('charisma',0)}**"
+        ),
+        inline=False
+    )
+
+    # Relationships
+    embed.add_field(
+        name="Relationships",
+        value=(
+            f"Mentor: **{char.get('mentor','None')}**\n"
+            f"Apprentice: **{char.get('apprentice','None')}**\n"
+            f"Mate: **{char.get('mate','None')}**\n"
+            f"Kits: **{char.get('kits','None')}**"
+        ),
+        inline=False
+    )
+
+    await interaction.response.send_message(embed=embed)
 # ----------------------- CLAN COMMAND -----------------------
 @bot.tree.command(name="clan", description="Join a clan")
 async def clan(interaction: discord.Interaction, clan_name: str):
