@@ -422,9 +422,16 @@ async def age(interaction: discord.Interaction):
     # Hunger cost
     char["hunger"] = max(char["hunger"] - 10, 0)
 
-    message = f"🌙 {char['prefix']} is now **{char['age']} moons old!**"
+    message = f"🌙 **{char['prefix']}** is now **{char['age']} moons old!**"
 
-    # Pregnancy progression
+    # ---------- Rank Milestones ----------
+    if char["age"] == 6 and not char["prefix"].endswith("paw"):
+        message += "\n🐾 You are **old enough to become an apprentice!** Ask a leader about your Mentor."
+
+    if char["age"] >= 12:
+        message += "\n⭐ You are **eligible to become a warrior!** A leader may perform your warrior ceremony soon!"
+
+    # ---------- Pregnancy Progression ----------
     if char.get("pregnant"):
 
         char["pregnant"]["months"] += 1
@@ -432,7 +439,6 @@ async def age(interaction: discord.Interaction):
 
         message += f"\n🤰 Pregnancy progressed to **{months}/5 moons**."
 
-        # Birth
         if months >= 5:
 
             kits = random.randint(1, 4)
