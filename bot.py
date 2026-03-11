@@ -182,7 +182,7 @@ def pregnancy_train_allowed(char):
 
 def apply_pregnancy_effects(char):
     if not char.get("pregnant"):
-    return 1.0
+         return 1.0
 
     stage = char["pregnant"].get("months", 0)
 
