@@ -406,6 +406,8 @@ async def pregnancy_status(interaction: discord.Interaction):
     suggestion_msg = "\n".join(suggestions) if suggestions else "You're doing well. Keep resting and eating!"
     await interaction.response.send_message(f"🌱 Month {months+1}/5, Carrier: {carrier}\n💡 Suggestions:\n{suggestion_msg}")
 # ----------------------- AGE COMMAND -----------------------
+import random
+
 @bot.tree.command(name="age", description="Age up one moon")
 async def age(interaction: discord.Interaction):
 
@@ -413,25 +415,26 @@ async def age(interaction: discord.Interaction):
     char = characters.get(uid)
 
     if not char:
-        await interaction.response.send_message("❌ You don't have a character.")
+        await interaction.response.send_message("❌ You don't have a character yet. Use /kit.")
         return
 
-    # Age increase
-    char["age"] += 1
+    # Increase age
+    char["age"] = char.get("age", 0) + 1
 
-    # Hunger cost
-    char["hunger"] = max(char["hunger"] - 10, 0)
+    # Hunger loss from aging
+    char["hunger"] = max(char.get("hunger", 100) - 10, 0)
 
     message = f"🌙 **{char['prefix']}** is now **{char['age']} moons old!**"
 
-    # ---------- Rank Milestones ----------
-    if char["age"] == 6 and not char["prefix"].endswith("paw"):
-        message += "\n🐾 You are **old enough to become an apprentice!** Ask a leader about your Mentor."
+    # Apprentice milestone
+    if char["age"] == 6:
+        message += "\n🐾 You are **old enough to become an apprentice!** Ask a leader for training."
 
-    if char["age"] >= 12:
-        message += "\n⭐ You are **eligible to become a warrior!** A leader may perform your warrior ceremony soon!"
+    # Warrior eligibility
+    if char["age"] == 12:
+        message += "\n⭐ You are **eligible to become a warrior!** A leader may perform your warrior ceremony."
 
-    # ---------- Pregnancy Progression ----------
+    # Pregnancy progression
     if char.get("pregnant"):
 
         char["pregnant"]["months"] += 1
@@ -448,7 +451,6 @@ async def age(interaction: discord.Interaction):
             char["pregnant"] = None
 
     await interaction.response.send_message(message)
-    
 @bot.tree.command(name="choose_suffix", description="Choose your future warrior suffix")
 async def choose_suffix(interaction: discord.Interaction, suffix: str):
     uid = interaction.user.id
