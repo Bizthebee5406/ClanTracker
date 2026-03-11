@@ -254,7 +254,6 @@ async def kit(interaction: discord.Interaction, prefix: str):
     if uid in characters:
         await interaction.response.send_message("You already have a character.")
         return
-    stats = generate_stats()
     characters[uid] = {
         "prefix": prefix,
         "rank": "kit",
@@ -262,7 +261,6 @@ async def kit(interaction: discord.Interaction, prefix: str):
         "suffix": None,
         "clan": None,
         "health": 100,
-        "stats": stats,
         "specialty": None,
         "skill_value": 0,
         "hunger": 50,
@@ -271,9 +269,7 @@ async def kit(interaction: discord.Interaction, prefix: str):
         "alive": True
     }
     await interaction.response.send_message(
-        f"🐾 **{prefix}kit** has been born!\n"
-        f"**Stats**:\n" + "\n".join(f"{k.capitalize()}: {v}" for k,v in stats.items())
-    )
+        f"🐾 **{prefix}kit** has been born!\n")
 # ----------------------- PREGNANCY SYSTEM -----------------------
 # Pregnancy rules:
 # - Full warriors, 12 moons minimum
@@ -632,11 +628,8 @@ async def take_prey(interaction: discord.Interaction):
         f"Hunger: **{char['hunger']}/100**"
     )
 # ----------------------- PROFILE -----------------------
-import discord
-
-@bot.tree.command(name="profile", description="View your cat's profile")
+@bot.tree.command(name="profile", description="View your character profile")
 async def profile(interaction: discord.Interaction):
-
     uid = interaction.user.id
     char = characters.get(uid)
 
@@ -644,60 +637,75 @@ async def profile(interaction: discord.Interaction):
         await interaction.response.send_message("❌ You don't have a character yet. Use /kit.")
         return
 
+    # Build name and basic info
+    name = f"{char['prefix']}{char.get('suffix','')}"
+    rank = char.get("rank", "unknown")
     clan = char.get("clan", "None")
+    moons = char.get("moons", 0)
     hunger = char.get("hunger", 0)
-    health = char.get("health", 100)
+    alive = char.get("alive", True)
+
+    status = "Alive 🐾" if alive else "Dead 💀"
+
+    # Pull stats from character
+    stats = generate_stats()
+
+    strength = stats.get("strength", 0)
+    perception = stats.get("perception", 0)
+    dexterity = stats.get("dexterity", 0)
+    speed = stats.get("speed", 0)
+    intelligence = stats.get("intelligence", 0)
+    luck = stats.get("luck", 0)
+    charisma = stats.get("charisma", 0)
+
+    # Clan-specific stat
+    clan_stat_name = char.get("specialty", "Skill")
+    clan_stat_value = stats.get(clan_stat_name, 0)
+
+    mentor = char.get("mentor", "None")
+    apprentice = char.get("apprentice", "None")
+    mate = char.get("mate", "None")
+    kits = char.get("kits", [])
+    kits_str = ", ".join(kits) if kits else "None"
 
     embed = discord.Embed(
-        title=f"🐾 {char.get('prefix','Unknown')}",
-        description=f"{char.get('rank','Cat')} of **{clan}Clan**",
+        title=f"🐾 {name}",
+        description=f"{rank.title()} of **{clan}Clan**",
         color=discord.Color.green()
     )
 
-    # Basic Info
     embed.add_field(
         name="Basic Info",
         value=(
-            f"Age: **{char.get('age',0)} moons**\n"
+            f"Age: **{moons} moons**\n"
             f"Hunger: **{hunger}/100**\n"
-            f"Health: **{health}/100**\n"
-            f"Status: **Alive 🐾**"
+            f"Status: **{status}**"
         ),
         inline=False
     )
 
-    # Stats
-    stats_text = (
-        f"Strength: **{char.get('strength',0)}**\n"
-        f"Perception: **{char.get('perception',0)}**\n"
-        f"Dexterity: **{char.get('dexterity',0)}**\n"
-        f"Speed: **{char.get('speed',0)}**\n"
-        f"Intelligence: **{char.get('intelligence',0)}**\n"
-        f"Luck: **{char.get('luck',0)}**\n"
-        f"Charisma: **{char.get('charisma',0)}**"
-    )
-
-    # Clan-specific stat
-    clan_stat_name = char.get("clan_stat_name")
-    clan_stat_value = char.get("clan_stat")
-
-    if clan_stat_name:
-        stats_text += f"\n{clan_stat_name}: **{clan_stat_value}**"
-
     embed.add_field(
         name="📊 Stats",
-        value=stats_text,
+        value=(
+            f"Strength: **{strength}**\n"
+            f"Perception: **{perception}**\n"
+            f"Dexterity: **{dexterity}**\n"
+            f"Speed: **{speed}**\n"
+            f"Intelligence: **{intelligence}**\n"
+            f"Luck: **{luck}**\n"
+            f"Charisma: **{charisma}**\n"
+            f"{clan_stat_name.capitalize()}: **{clan_stat_value}**"
+        ),
         inline=False
     )
 
-    # Relationships
     embed.add_field(
         name="Relationships",
         value=(
-            f"Mentor: **{char.get('mentor','None')}**\n"
-            f"Apprentice: **{char.get('apprentice','None')}**\n"
-            f"Mate: **{char.get('mate','None')}**\n"
-            f"Kits: **{char.get('kits','None')}**"
+            f"Mentor: **{mentor}**\n"
+            f"Apprentice: **{apprentice}**\n"
+            f"Mate: **{mate}**\n"
+            f"Kits: **{kits_str}**"
         ),
         inline=False
     )
