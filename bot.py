@@ -583,69 +583,49 @@ async def profile(interaction: discord.Interaction):
         await interaction.response.send_message("❌ You don't have a character yet. Use /kit.")
         return
 
-    # Hunger message
-    hunger = char["hunger"]
-    if hunger >= 90:
-        hunger_msg = "Well Fed"
-    elif hunger >= 70:
-        hunger_msg = "Content"
-    elif hunger >= 40:
-        hunger_msg = "Hungry"
-    elif hunger >= 20:
-        hunger_msg = "Very Hungry"
-    else:
-        hunger_msg = "Starving"
-
-    # Health message
-    health = char["health"]
-    if health >= 80:
-        health_msg = "Healthy"
-    elif health >= 50:
-        health_msg = "Minor Injuries"
-    elif health >= 25:
-        health_msg = "Injured – See a Medicine Cat"
-    else:
-        health_msg = "Critical – Medicine Cat Needed"
-
-    # Pregnancy text
-    pregnancy_text = "None"
-    if char.get("pregnant"):
-        pregnancy_text = f"{char['pregnant']['months']}/5 moons pregnant"
-
-    # Rank display
-    rank = char.get("rank", "Cat")
+    clan = char.get("clan", "None")
+    hunger = char.get("hunger", 0)
+    health = char.get("health", 100)
 
     embed = discord.Embed(
-        title=f"🐾 {char['prefix']}",
-        description=f"{rank} of **{char.get('clan','No Clan')}Clan**",
+        title=f"🐾 {char.get('prefix','Unknown')}",
+        description=f"{char.get('rank','Cat')} of **{clan}Clan**",
         color=discord.Color.green()
     )
 
-    # Basic info
+    # Basic Info
     embed.add_field(
         name="Basic Info",
         value=(
-            f"Age: **{char['age']} moons**\n"
-            f"Hunger: **{char['hunger']}/100** ({hunger_msg})\n"
-            f"Health: **{char['health']}/100** ({health_msg})\n"
-            f"Pregnancy: **{pregnancy_text}**\n"
+            f"Age: **{char.get('age',0)} moons**\n"
+            f"Hunger: **{hunger}/100**\n"
+            f"Health: **{health}/100**\n"
             f"Status: **Alive 🐾**"
         ),
         inline=False
     )
 
-    # Stats (using the stats your system actually has)
+    # Stats
+    stats_text = (
+        f"Strength: **{char.get('strength',0)}**\n"
+        f"Perception: **{char.get('perception',0)}**\n"
+        f"Dexterity: **{char.get('dexterity',0)}**\n"
+        f"Speed: **{char.get('speed',0)}**\n"
+        f"Intelligence: **{char.get('intelligence',0)}**\n"
+        f"Luck: **{char.get('luck',0)}**\n"
+        f"Charisma: **{char.get('charisma',0)}**"
+    )
+
+    # Clan-specific stat
+    clan_stat_name = char.get("clan_stat_name")
+    clan_stat_value = char.get("clan_stat")
+
+    if clan_stat_name:
+        stats_text += f"\n{clan_stat_name}: **{clan_stat_value}**"
+
     embed.add_field(
         name="📊 Stats",
-        value=(
-            f"Strength: **{char.get('strength',0)}**\n"
-            f"Dexterity: **{char.get('dexterity',0)}**\n"
-            f"Speed: **{char.get('speed',0)}**\n"
-            f"Perception: **{char.get('perception',0)}**\n"
-            f"Intelligence: **{char.get('intelligence',0)}**\n"
-            f"Luck: **{char.get('luck',0)}**\n"
-            f"Charisma: **{char.get('charisma',0)}**"
-        ),
+        value=stats_text,
         inline=False
     )
 
