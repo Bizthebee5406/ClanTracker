@@ -451,6 +451,7 @@ async def age(interaction: discord.Interaction):
             char["pregnant"] = None
 
     await interaction.response.send_message(message)
+    
 @bot.tree.command(name="choose_suffix", description="Choose your future warrior suffix")
 async def choose_suffix(interaction: discord.Interaction, suffix: str):
     uid = interaction.user.id
@@ -478,9 +479,8 @@ async def choose_suffix(interaction: discord.Interaction, suffix: str):
         f"🌟 Your future warrior name will be **{char['prefix']}{suffix}** when you are promoted."
     )
 # ----------------------- PREYPILE COMMAND -----------------------
-@bot.tree.command(name="preypile", description="View the clan fresh-kill pile")
-async def preypile(interaction: discord.Interaction):
-
+@bot.tree.command(name="profile", description="View your character profile")
+async def profile(interaction: discord.Interaction):
     uid = interaction.user.id
     char = characters.get(uid)
 
@@ -488,19 +488,80 @@ async def preypile(interaction: discord.Interaction):
         await interaction.response.send_message("❌ You don't have a character yet. Use /kit.")
         return
 
-    clan = char.get("clan")
+    # Build name and basic info
+    name = f"{char['prefix']}{char.get('suffix','')}"
+    rank = char.get("rank", "unknown")
+    clan = char.get("clan", "None")
+    moons = char.get("moons", 0)
+    hunger = char.get("hunger", 0)
+    alive = char.get("alive", True)
 
-    if not clan:
-        await interaction.response.send_message("⚠️ You are not in a clan.")
-        return
+    status = "Alive 🐾" if alive else "Dead 💀"
 
-    pile = clan_prey_piles.get(clan, 0)
+    # Pull stats from character
+    stats = char.get("stats", {})
 
-    await interaction.response.send_message(
-        f"🐟 **{clan}Clan Fresh-Kill Pile**\n\n"
-        f"Total Prey Value: **{pile}**"
+    strength = stats.get("strength", 0)
+    perception = stats.get("perception", 0)
+    dexterity = stats.get("dexterity", 0)
+    speed = stats.get("speed", 0)
+    intelligence = stats.get("intelligence", 0)
+    luck = stats.get("luck", 0)
+    charisma = stats.get("charisma", 0)
+
+    # Clan-specific stat
+    clan_stat_name = char.get("specialty", "Skill")
+    clan_stat_value = stats.get(clan_stat_name, 0)
+
+    mentor = char.get("mentor", "None")
+    apprentice = char.get("apprentice", "None")
+    mate = char.get("mate", "None")
+    kits = char.get("kits", [])
+    kits_str = ", ".join(kits) if kits else "None"
+
+    embed = discord.Embed(
+        title=f"🐾 {name}",
+        description=f"{rank.title()} of **{clan}Clan**",
+        color=discord.Color.green()
     )
 
+    embed.add_field(
+        name="Basic Info",
+        value=(
+            f"Age: **{moons} moons**\n"
+            f"Hunger: **{hunger}/100**\n"
+            f"Status: **{status}**"
+        ),
+        inline=False
+    )
+
+    embed.add_field(
+        name="📊 Stats",
+        value=(
+            f"Strength: **{strength}**\n"
+            f"Perception: **{perception}**\n"
+            f"Dexterity: **{dexterity}**\n"
+            f"Speed: **{speed}**\n"
+            f"Intelligence: **{intelligence}**\n"
+            f"Luck: **{luck}**\n"
+            f"Charisma: **{charisma}**\n"
+            f"{clan_stat_name.capitalize()}: **{clan_stat_value}**"
+        ),
+        inline=False
+    )
+
+    embed.add_field(
+        name="Relationships",
+        value=(
+            f"Mentor: **{mentor}**\n"
+            f"Apprentice: **{apprentice}**\n"
+            f"Mate: **{mate}**\n"
+            f"Kits: **{kits_str}**"
+        ),
+        inline=False
+    )
+
+    await interaction.response.send_message(embed=embed)
 @bot.tree.command(name="make_warrior", description="Promote an apprentice to warrior")
 async def make_warrior(interaction: discord.Interaction, member: discord.Member):
     uid = member.id
