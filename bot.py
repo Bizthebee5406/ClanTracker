@@ -180,7 +180,7 @@ def pregnancy_train_allowed(char):
         return True
     return char["pregnant"]["months"] < 4
 
-    def apply_pregnancy_effects(char):
+def apply_pregnancy_effects(char):
     if not char.get("pregnant"):
         return 1.0
 
