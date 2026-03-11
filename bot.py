@@ -254,6 +254,8 @@ async def kit(interaction: discord.Interaction, prefix: str):
     if uid in characters:
         await interaction.response.send_message("You already have a character.")
         return
+
+    stats = generate_stats()
     characters[uid] = {
         "prefix": prefix,
         "rank": "kit",
@@ -261,15 +263,18 @@ async def kit(interaction: discord.Interaction, prefix: str):
         "suffix": None,
         "clan": None,
         "health": 100,
+        "stats": stats,
         "specialty": None,
         "skill_value": 0,
         "hunger": 50,
-        "training_sessions":0,
-        "exhaustion":0,
+        "training_sessions": 0,
+        "exhaustion": 0,
         "alive": True
     }
+
     await interaction.response.send_message(
-        f"🐾 **{prefix}kit** has been born!\n")
+        f"🐾 **{prefix}kit** has been born!"
+    )
 # ----------------------- PREGNANCY SYSTEM -----------------------
 # Pregnancy rules:
 # - Full warriors, 12 moons minimum
