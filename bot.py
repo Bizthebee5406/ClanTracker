@@ -478,57 +478,27 @@ async def choose_suffix(interaction: discord.Interaction, suffix: str):
         f"🌟 Your future warrior name will be **{char['prefix']}{suffix}** when you are promoted."
     )
 # ----------------------- PREYPILE COMMAND -----------------------
-from discord.ui import View, Button
-
-@bot.tree.command(name="preypile", description="Check or take prey from your clan's fresh kill pile")
+@bot.tree.command(name="preypile", description="View the clan fresh-kill pile")
 async def preypile(interaction: discord.Interaction):
+
     uid = interaction.user.id
-
-    # Ensure character exists
     char = characters.get(uid)
+
     if not char:
-        await interaction.response.send_message("❌ You don't have a character yet! Use /kit.")
+        await interaction.response.send_message("❌ You don't have a character yet. Use /kit.")
         return
 
-    # Ensure character has a clan
     clan = char.get("clan")
+
     if not clan:
-        await interaction.response.send_message("⚠️ Join a clan first with /clan.")
+        await interaction.response.send_message("⚠️ You are not in a clan.")
         return
 
-    # Ensure fresh kill pile exists
-    pile = fresh_kill_piles.get(clan)
-    if pile is None:
-        fresh_kill_piles[clan] = []
-        pile = fresh_kill_piles[clan]
-
-    # If empty, add starter prey
-    if not pile:
-        starter_prey = ["mouse", "rabbit", "vole"]
-        pile.extend(starter_prey)
-        await interaction.response.send_message(
-            f"🐾 The fresh kill pile was empty. Added starter prey: {', '.join(starter_prey)}."
-        )
-        return
-
-    # Pop first prey
-    prey = pile.pop(0)
-
-    # Hunger gain
-    hunger_gain = 40
-    if char.get("pregnant"):
-        stage = char["pregnant"].get("months", 0)
-        hunger_gain += stage * 5
-
-    char["hunger"] = min(char.get("hunger", 50) + hunger_gain, 100)
-
-    # Reduce camp quality safely
-    camp_quality[clan] = max(0, camp_quality.get(clan, 50) - 2)
+    pile = clan_prey_piles.get(clan, 0)
 
     await interaction.response.send_message(
-        f"🍖 You take a **{prey}** from the fresh kill pile and eat it.\n"
-        f"Your hunger is now **{char['hunger']}/100**\n"
-        f"🏕 Camp quality slightly decreased: **{camp_quality[clan]}**"
+        f"🐟 **{clan}Clan Fresh-Kill Pile**\n\n"
+        f"Total Prey Value: **{pile}**"
     )
 
 @bot.tree.command(name="make_warrior", description="Promote an apprentice to warrior")
@@ -571,61 +541,34 @@ async def make_warrior(interaction: discord.Interaction, member: discord.Member)
 
     await interaction.response.send_message(ceremony)
 # ----------------------- TAKE PREY -----------------------
-from discord.ui import View, Button
-
-@bot.tree.command(name="take_prey", description="Take prey from your clan's fresh kill pile")
+@bot.tree.command(name="take_prey", description="Take prey from the clan pile to eat")
 async def take_prey(interaction: discord.Interaction):
+
     uid = interaction.user.id
-
-    # Ensure the user has a character
     char = characters.get(uid)
+
     if not char:
-        await interaction.response.send_message("❌ You don't have a character yet! Use /kit.")
+        await interaction.response.send_message("❌ You don't have a character.")
         return
 
-    # Ensure the character has a clan
     clan = char.get("clan")
+
     if not clan:
-        await interaction.response.send_message("⚠️ Join a clan first with /clan.")
+        await interaction.response.send_message("⚠️ You are not in a clan.")
         return
 
-    # Ensure fresh kill pile exists
-    pile = fresh_kill_piles.get(clan)
-    if pile is None:
-        fresh_kill_piles[clan] = []
-        pile = fresh_kill_piles[clan]
-
-    # If empty, provide starter prey
-    if not pile:
-        starter_prey = ["mouse", "rabbit", "vole"]
-        pile.extend(starter_prey)
-        await interaction.response.send_message(
-            f"🐾 The fresh kill pile was empty. Added starter prey: {', '.join(starter_prey)}."
-        )
+    if clan_prey_piles.get(clan, 0) <= 0:
+        await interaction.response.send_message("❌ The fresh-kill pile is empty.")
         return
 
-    # Take the first prey
-    prey = pile.pop(0)
+    # Take food
+    clan_prey_piles[clan] -= 10
 
-    # Base hunger gain
-    hunger_gain = 40
+    char["hunger"] = min(char["hunger"] + 40, 100)
 
-    # Extra nourishment if pregnant
-    if char.get("pregnant"):
-        stage = char["pregnant"].get("months", 0)
-        hunger_gain += stage * 5  # More for kits
-
-    # Update hunger safely
-    char["hunger"] = min(char.get("hunger", 50) + hunger_gain, 100)
-
-    # Reduce camp quality safely
-    camp_quality[clan] = max(0, camp_quality.get(clan, 50) - 2)
-
-    # Send feedback message
     await interaction.response.send_message(
-        f"🍖 You take a **{prey}** from the fresh kill pile and eat it.\n"
-        f"Your hunger is now **{char['hunger']}/100**\n"
-        f"🏕 Camp quality slightly decreased: **{camp_quality[clan]}**"
+        f"🍖 You took prey from the pile and ate.\n"
+        f"Hunger: **{char['hunger']}/100**"
     )
 # ----------------------- PROFILE -----------------------
 import discord
