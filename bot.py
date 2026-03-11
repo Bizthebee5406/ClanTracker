@@ -175,7 +175,7 @@ def pregnancy_hunt_modifier(char):
         return 0
     return char["pregnant"].get("months", 0) * 5
 
-    def pregnancy_train_allowed(char):
+def pregnancy_train_allowed(char):
     if not char.get("pregnant"):
         return True
     return char["pregnant"]["months"] < 4
