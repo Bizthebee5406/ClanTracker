@@ -15,6 +15,7 @@ characters = {}
 pending_hunts = {}
 pending_battles = {}
 battle_state = {}
+pregnancies = {}
 camp_quality = {"Thunder": 75, "River": 75, "Shadow": 75, "Wind": 75}
 # ----------------------- INITIAL CLAN PREY -----------------------
 # Each clan starts with some prey so kits can eat
@@ -168,9 +169,37 @@ def process_pregnancy_moon():
         carrier = characters.get(carrier_id)
         if not carrier:
             continue
+            
+def pregnancy_hunt_modifier(char):
+    if not char.get("pregnant"):
+        return 0
+    return char["pregnant"].get("months", 0) * 5
 
+    def pregnancy_train_allowed(char):
+    if not char.get("pregnant"):
+        return True
+    return char["pregnant"]["months"] < 4
+
+    def apply_pregnancy_effects(char):
+    if not char.get("pregnant"):
+        return 1.0
+
+    stage = char["pregnant"].get("months", 0)
+
+    if stage <= 2:
+        return 1.0
+    elif stage <= 4:
+        return 0.8
+    else:
+        return 0.6
         # Seasonal modifier
         season_mod = seasonal_pregnancy_modifiers.get(season, {"health_mult": 1.0, "max_kits": 4})
+        seasonal_pregnancy_modifiers = {
+    "newleaf": {"health_mult": 1.1, "max_kits": 5},
+    "greenleaf": {"health_mult": 1.0, "max_kits": 4},
+    "leaf-fall": {"health_mult": 0.9, "max_kits": 4},
+    "leafbare": {"health_mult": 0.8, "max_kits": 3}
+        }
 
         # Increase hunger due to pregnancy
         carrier["hunger"] = min(100, carrier["hunger"] + 10)
@@ -377,50 +406,42 @@ async def pregnancy_status(interaction: discord.Interaction):
     suggestion_msg = "\n".join(suggestions) if suggestions else "You're doing well. Keep resting and eating!"
     await interaction.response.send_message(f"🌱 Month {months+1}/5, Carrier: {carrier}\n💡 Suggestions:\n{suggestion_msg}")
 # ----------------------- AGE COMMAND -----------------------
-@bot.tree.command(name="age", description="Age your character by one moon.")
+@bot.tree.command(name="age", description="Age up one moon")
 async def age(interaction: discord.Interaction):
+
     uid = interaction.user.id
     char = characters.get(uid)
-    if not char or not char.get("alive", True):
-        await interaction.response.send_message("❌ You don't have a living character.")
+
+    if not char:
+        await interaction.response.send_message("❌ You don't have a character.")
         return
 
-    # Age character by one moon
-    char["moons"] = char.get("moons", 0) + 1
+    # Age increase
+    char["age"] += 1
 
-    # Reduce hunger slightly each moon
-    hunger_cost = -10
-    char["hunger"] = max(0, char["hunger"] + hunger_cost)
+    # Hunger cost
+    char["hunger"] = max(char["hunger"] - 10, 0)
 
-    # Reset training sessions and exhaustion each moon
-    char["training_sessions"] = 0
-    char["exhaustion"] = 0
+    message = f"🌙 {char['prefix']} is now **{char['age']} moons old!**"
 
-    # Promotion: Kit → Apprentice at 6 moons
-    promotion_msg = ""
-    if char["rank"] == "kit" and char.get("moons", 0) >= 6:
-        char["rank"] = "apprentice"
-        char["suffix"] = "paw"  # update suffix to 'paw'
-        promotion_msg = f"🌟 {char['prefix']} has grown into an apprentice and now has the suffix 'paw'!"
+    # Pregnancy progression
+    if char.get("pregnant"):
 
-    # Hunger warnings
-    hunger_msg = ""
-    if char["hunger"] <= 0:
-        char["alive"] = False
-        await interaction.response.send_message(f"💀 {char['prefix']} has starved to death.")
-        return
-    elif char["hunger"] < 20:
-        hunger_msg = "⚠️ You are starving and need to eat soon!"
+        char["pregnant"]["months"] += 1
+        months = char["pregnant"]["months"]
 
-    # Combine messages
-    final_msg = "\n".join(filter(None, [hunger_msg, promotion_msg]))
+        message += f"\n🤰 Pregnancy progressed to **{months}/5 moons**."
 
-    await interaction.response.send_message(
-        f"🌙 {char['prefix']} ages one moon.\n"
-        f"Age: {char['moons']} moons\n"
-        f"Hunger -10 → {char['hunger']}\n"
-        f"{final_msg}"
-    )
+        # Birth
+        if months >= 5:
+
+            kits = random.randint(1, 4)
+
+            message += f"\n🐣 **{char['prefix']} has given birth to {kits} kits!**"
+
+            char["pregnant"] = None
+
+    await interaction.response.send_message(message)
     
 @bot.tree.command(name="choose_suffix", description="Choose your future warrior suffix")
 async def choose_suffix(interaction: discord.Interaction, suffix: str):
@@ -601,8 +622,9 @@ async def take_prey(interaction: discord.Interaction):
 # ----------------------- PROFILE -----------------------
 import discord
 
-@bot.tree.command(name="profile", description="View your character profile")
+@bot.tree.command(name="profile", description="View your cat's profile")
 async def profile(interaction: discord.Interaction):
+
     uid = interaction.user.id
     char = characters.get(uid)
 
@@ -610,73 +632,54 @@ async def profile(interaction: discord.Interaction):
         await interaction.response.send_message("❌ You don't have a character yet. Use /kit.")
         return
 
-    # Automatically build name
-    name = f"{char['prefix']}{char.get('suffix','')}"
+    # Hunger message
+    hunger = char["hunger"]
+    if hunger >= 90:
+        hunger_msg = "🟢 Well fed"
+    elif hunger >= 70:
+        hunger_msg = "🙂 Content"
+    elif hunger >= 40:
+        hunger_msg = "😐 Getting hungry"
+    elif hunger >= 20:
+        hunger_msg = "⚠️ Very hungry"
+    else:
+        hunger_msg = "🚨 Starving!"
 
-    rank = char.get("rank", "unknown")
-    clan = char.get("clan", "None")
-    moons = char.get("moons", 0)
-    hunger = char.get("hunger", 0)
-    alive = char.get("alive", True)
+    # Health message
+    health = char["health"]
+    if health >= 80:
+        health_msg = "🟢 Healthy"
+    elif health >= 50:
+        health_msg = "🟡 Slightly injured"
+    elif health >= 25:
+        health_msg = "⚠️ Injured - visit a medicine cat"
+    else:
+        health_msg = "🚨 Critical - see a medicine cat immediately!"
 
-    status = "Alive 🐾" if alive else "Dead 💀"
+    # Pregnancy info
+    preg_text = "None"
+    if char.get("pregnant"):
+        preg = char["pregnant"]
+        preg_text = f"{preg['months']}/5 moons pregnant"
 
-    stats = char.get("stats", {})
+    await interaction.response.send_message(
+        f"🐾 **{char['prefix']} ({interaction.user.display_name})**\n\n"
+        f"Clan: {char.get('clan','None')}\n"
+        f"Age: {char['age']} moons\n"
+        f"Pregnancy: {preg_text}\n\n"
 
-    strength = stats.get("strength", 0)
-    agility = stats.get("agility", 0)
-    intelligence = stats.get("intelligence", 0)
-    stealth = stats.get("stealth", 0)
-    perception = stats.get("perception", 0)
+        f"❤️ Health: {health}/100 — {health_msg}\n"
+        f"🍗 Hunger: {hunger}/100 — {hunger_msg}\n\n"
 
-    mentor = char.get("mentor", "None")
-    apprentice = char.get("apprentice", "None")
-    mate = char.get("mate", "None")
-    kits = char.get("kits", [])
-
-    if isinstance(kits, list):
-        kits = ", ".join(kits) if kits else "None"
-
-    embed = discord.Embed(
-        title=f"🐾 {name}",
-        description=f"{rank.title()} of **{clan}Clan**",
-        color=discord.Color.green()
+        f"**Stats**\n"
+        f"💪 Strength: {char.get('strength',0)}\n"
+        f"🤸 Dexterity: {char.get('dexterity',0)}\n"
+        f"💨 Speed: {char.get('speed',0)}\n"
+        f"👀 Perception: {char.get('perception',0)}\n"
+        f"🧠 Intelligence: {char.get('intelligence',0)}\n"
+        f"🍀 Luck: {char.get('luck',0)}\n"
+        f"✨ Charisma: {char.get('charisma',0)}"
     )
-
-    embed.add_field(
-        name="Basic Info",
-        value=(
-            f"Age: **{moons} moons**\n"
-            f"Hunger: **{hunger}/100**\n"
-            f"Status: **{status}**"
-        ),
-        inline=False
-    )
-
-    embed.add_field(
-        name="📊 Stats",
-        value=(
-            f"Strength: **{strength}**\n"
-            f"Agility: **{agility}**\n"
-            f"Intelligence: **{intelligence}**\n"
-            f"Stealth: **{stealth}**\n"
-            f"Perception: **{perception}**"
-        ),
-        inline=False
-    )
-
-    embed.add_field(
-        name="Relationships",
-        value=(
-            f"Mentor: **{mentor}**\n"
-            f"Apprentice: **{apprentice}**\n"
-            f"Mate: **{mate}**\n"
-            f"Kits: **{kits}**"
-        ),
-        inline=False
-    )
-
-    await interaction.response.send_message(embed=embed)
 # ----------------------- CLAN COMMAND -----------------------
 @bot.tree.command(name="clan", description="Join a clan")
 async def clan(interaction: discord.Interaction, clan_name: str):
