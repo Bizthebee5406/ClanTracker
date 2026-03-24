@@ -16,6 +16,7 @@ pending_hunts = {}
 pending_battles = {}
 battle_state = {}
 pregnancies = {}
+custom_clans = {}
 camp_quality = {"Thunder": 75, "River": 75, "Shadow": 75, "Wind": 75}
 # ----------------------- INITIAL CLAN PREY -----------------------
 # Each clan starts with some prey so kits can eat
@@ -241,6 +242,189 @@ def apply_pregnancy_effects(char):
                     "skill_value": 0,
                     "hunger": 50
                 }
+
+            )
+import hashlib
+from discord.ui import View, Button
+
+def generate_clan_colors(clan_name):
+    base_hash = int(hashlib.md5(clan_name.encode()).hexdigest(), 16)
+
+    colors = []
+    for i in range(4):
+        r = (base_hash >> (i * 6)) & 0xFF
+        g = (base_hash >> (i * 12)) & 0xFF
+        b = (base_hash >> (i * 18)) & 0xFF
+
+        r = (r % 156) + 100
+        g = (g % 156) + 100
+        b = (b % 156) + 100
+
+        colors.append(discord.Color.from_rgb(r, g, b))
+
+    return colors
+
+
+@bot.tree.command(name="create_clan", description="Create a new clan (Admin only)")
+@app_commands.checks.has_permissions(administrator=True)
+async def create_clan(interaction: discord.Interaction, clan_name: str, leader: discord.Member):
+
+    creator_id = interaction.user.id
+    guild = interaction.guild
+
+    # ---------------- VALIDATION ----------------
+    if creator_id not in characters:
+        await interaction.response.send_message("❌ You need a character.")
+        return
+
+    if leader.id not in characters:
+        await interaction.response.send_message("❌ That user doesn't have a character.")
+        return
+
+    if characters[leader.id].get("is_leader"):
+        await interaction.response.send_message("⚠️ That user is already a leader.")
+        return
+
+    clan_name = clan_name.capitalize()
+
+    if clan_name in clan_specialties:
+        await interaction.response.send_message("❌ That clan already exists.")
+        return
+
+    colors = generate_clan_colors(clan_name)
+
+    # ---------------- COLOR MENU ----------------
+    async def show_color_options(i):
+        view = View(timeout=180)
+
+        for idx, color in enumerate(colors):
+
+            btn = Button(label=f"Color {idx+1}", style=discord.ButtonStyle.secondary)
+
+            async def pick_callback(inter, chosen=color):
+                if inter.user.id != creator_id:
+                    await inter.response.send_message("❌ Only the creator can choose.", ephemeral=True)
+                    return
+
+                await show_preview(inter, chosen)
+
+            btn.callback = pick_callback
+            view.add_item(btn)
+
+        await i.response.edit_message(
+            content=f"🎨 Choose a color for **{clan_name}Clan**:",
+            embed=None,
+            view=view
+        )
+
+    # ---------------- PREVIEW ----------------
+    async def show_preview(i, chosen_color):
+        view = View(timeout=180)
+
+        embed = discord.Embed(
+            title=f"{clan_name}Clan Preview",
+            description=f"👑 Leader: {characters[leader.id]['prefix']}",
+            color=chosen_color
+        )
+
+        embed.add_field(
+            name="Confirm Clan Creation",
+            value="Press **Confirm** to create the clan or **Pick Another** to choose again."
+        )
+
+        # ✅ CONFIRM
+        async def confirm(inter):
+            if inter.user.id != creator_id:
+                await inter.response.send_message("❌ Only the creator can confirm.", ephemeral=True)
+                return
+
+            role_name = f"{clan_name}Clan"
+
+            role = discord.utils.get(guild.roles, name=role_name)
+            if not role:
+                role = await guild.create_role(
+                    name=role_name,
+                    colour=chosen_color,
+                    mentionable=True,
+                    hoist=True
+                )
+
+            # Remove old clan roles
+            clan_roles = [r for r in guild.roles if r.name.endswith("Clan")]
+            member_obj = guild.get_member(leader.id)
+
+            for r in clan_roles:
+                if r in member_obj.roles:
+                    await member_obj.remove_roles(r)
+
+            await member_obj.add_roles(role)
+
+            # Assign character
+            char = characters[leader.id]
+            char["clan"] = clan_name
+            char["rank"] = "leader"
+            char["is_leader"] = True
+
+            # ✅ FIXED specialty (important)
+            clan_specialties[clan_name] = "adaptability"
+
+            # Save clan
+            custom_clans[clan_name] = {"leader": leader.id}
+            clan_prey_piles[clan_name] = 20
+            fresh_kill_piles[clan_name] = ["mouse", "rabbit"]
+
+            prey_tables[clan_name] = {
+                "greenleaf": {"mouse": 2, "rabbit": 4},
+                "leafbare": {"mouse": 2}
+            }
+
+            camp_quality[clan_name] = 75
+
+            await inter.response.edit_message(
+                content=f"🌟 **{clan_name}Clan has been created!**\n👑 Leader: **{char['prefix']}**",
+                embed=None,
+                view=None
+            )
+
+        # ❌ DENY
+        async def deny(inter):
+            if inter.user.id != creator_id:
+                await inter.response.send_message("❌ Only the creator can deny.", ephemeral=True)
+                return
+
+            await show_color_options(inter)
+
+        confirm_btn = Button(label="Confirm", style=discord.ButtonStyle.green)
+        deny_btn = Button(label="Pick Another", style=discord.ButtonStyle.red)
+
+        confirm_btn.callback = confirm
+        deny_btn.callback = deny
+
+        view.add_item(confirm_btn)
+        view.add_item(deny_btn)
+
+        await i.response.edit_message(embed=embed, view=view)
+
+    # ---------------- INITIAL BUTTONS ----------------
+    view = View(timeout=180)
+
+    for idx, color in enumerate(colors):
+        btn = Button(label=f"Color {idx+1}", style=discord.ButtonStyle.secondary)
+
+        async def callback(i, chosen=color):
+            if i.user.id != creator_id:
+                await i.response.send_message("❌ Only the creator can choose.", ephemeral=True)
+                return
+
+            await show_preview(i, chosen)
+
+        btn.callback = callback
+        view.add_item(btn)
+
+    await interaction.response.send_message(
+        f"🎨 Choose a color for **{clan_name}Clan**:",
+        view=view
+    )
 # ----------------------- EVENTS -----------------------
 @bot.event
 async def on_ready():
