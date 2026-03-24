@@ -479,90 +479,9 @@ async def choose_suffix(interaction: discord.Interaction, suffix: str):
     await interaction.response.send_message(
         f"🌟 Your future warrior name will be **{char['prefix']}{suffix}** when you are promoted."
     )
-# ----------------------- PREYPILE COMMAND -----------------------
-@bot.tree.command(name="profile", description="View your character profile")
-async def profile(interaction: discord.Interaction):
-    uid = interaction.user.id
-    char = characters.get(uid)
-
-    if not char:
-        await interaction.response.send_message("❌ You don't have a character yet. Use /kit.")
-        return
-
-    # Build name and basic info
-    name = f"{char['prefix']}{char.get('suffix','')}"
-    rank = char.get("rank", "unknown")
-    clan = char.get("clan", "None")
-    moons = char.get("moons", 0)
-    hunger = char.get("hunger", 0)
-    alive = char.get("alive", True)
-
-    status = "Alive 🐾" if alive else "Dead 💀"
-
-    # Pull stats from character
-    stats = char.get("stats", {})
-
-    strength = stats.get("strength", 0)
-    perception = stats.get("perception", 0)
-    dexterity = stats.get("dexterity", 0)
-    speed = stats.get("speed", 0)
-    intelligence = stats.get("intelligence", 0)
-    luck = stats.get("luck", 0)
-    charisma = stats.get("charisma", 0)
-
-    # Clan-specific stat
-    clan_stat_name = char.get("specialty", "Skill")
-    clan_stat_value = stats.get(clan_stat_name, 0)
-
-    mentor = char.get("mentor", "None")
-    apprentice = char.get("apprentice", "None")
-    mate = char.get("mate", "None")
-    kits = char.get("kits", [])
-    kits_str = ", ".join(kits) if kits else "None"
-
-    embed = discord.Embed(
-        title=f"🐾 {name}",
-        description=f"{rank.title()} of **{clan}Clan**",
-        color=discord.Color.green()
-    )
-
-    embed.add_field(
-        name="Basic Info",
-        value=(
-            f"Age: **{moons} moons**\n"
-            f"Hunger: **{hunger}/100**\n"
-            f"Status: **{status}**"
-        ),
-        inline=False
-    )
-
-    embed.add_field(
-        name="📊 Stats",
-        value=(
-            f"Strength: **{strength}**\n"
-            f"Perception: **{perception}**\n"
-            f"Dexterity: **{dexterity}**\n"
-            f"Speed: **{speed}**\n"
-            f"Intelligence: **{intelligence}**\n"
-            f"Luck: **{luck}**\n"
-            f"Charisma: **{charisma}**\n"
-            f"{clan_stat_name.capitalize()}: **{clan_stat_value}**"
-        ),
-        inline=False
-    )
-
-    embed.add_field(
-        name="Relationships",
-        value=(
-            f"Mentor: **{mentor}**\n"
-            f"Apprentice: **{apprentice}**\n"
-            f"Mate: **{mate}**\n"
-            f"Kits: **{kits_str}**"
-        ),
-        inline=False
-    )
-
+    
     await interaction.response.send_message(embed=embed)
+    
 @bot.tree.command(name="make_warrior", description="Promote an apprentice to warrior")
 async def make_warrior(interaction: discord.Interaction, member: discord.Member):
     uid = member.id
@@ -572,33 +491,71 @@ async def make_warrior(interaction: discord.Interaction, member: discord.Member)
         await interaction.response.send_message("❌ That user doesn't have a character.")
         return
 
-    if char["rank"] != "apprentice":
-        await interaction.response.send_message("⚠️ Only apprentices can be promoted.")
+    if char.get("rank") != "apprentice":
+        await interaction.response.send_message("⚠️ Only apprentices can be promoted to warrior.")
         return
 
     suffix = char.get("future_suffix")
     if not suffix:
-        await interaction.response.send_message("⚠️ That apprentice has not chosen a warrior suffix yet.")
+        await interaction.response.send_message("⚠️ They need to choose a suffix first using /choose_suffix.")
+        return
+
+    moons = char.get("moons", 0)
+    if moons < 12:
+        await interaction.response.send_message(
+            f"⚠️ They are only **{moons} moons old**. Not ready to become a warrior."
+        )
         return
 
     clan = char.get("clan", "Unknown")
 
-    # Promote the apprentice
+    old_name = f"{char['prefix']}paw"
+    new_name = f"{char['prefix']}{suffix}"
+
+    # ---------------- PERMANENT STAT BOOST ----------------
+    stats = char.get("stats", {})
+
+    stats["strength"] += 2
+    stats["speed"] += 1
+    stats["dexterity"] += 1
+
+    # Clan bonus
+    if clan == "Thunder":
+        stats["strength"] += 1
+    elif clan == "River":
+        stats["perception"] += 1
+    elif clan == "Shadow":
+        stats["dexterity"] += 1
+    elif clan == "Wind":
+        stats["speed"] += 1
+
+    char["stats"] = stats
+
+    # ---------------- TEMPORARY BUFF ----------------
+    char["warrior_buff"] = {
+        "active": True,
+        "expires_in": 1,  # lasts 1 moon
+        "bonus": {
+            "strength": 2,
+            "speed": 2
+        }
+    }
+
+    # Promote
     char["rank"] = "warrior"
     char["suffix"] = suffix
     char.pop("future_suffix", None)
 
-    apprentice_name = f"{char['prefix']}paw"
-    warrior_name = f"{char['prefix']}{suffix}"
-
+    # Ceremony
     ceremony = (
         "🌟 **Warrior Ceremony** 🌟\n\n"
-        "Let all cats old enough to catch their own prey join for a clan meeting.\n\n"
-        f"I, leader of **{clan}Clan**, call upon my warrior ancestors to look down on this apprentice.\n\n"
-        f"**{apprentice_name}**, you have trained hard and proven yourself loyal and brave.\n\n"
-        f"From this moment forward, you will be known as **{warrior_name}**.\n\n"
-        f"StarClan honors your courage and welcomes you as a full warrior of **{clan}Clan**!\n\n"
-        f"🎉 Everyone chant **{warrior_name}! {warrior_name}! {warrior_name}!**"
+        "Let all cats old enough to catch their own prey gather beneath the Highrock.\n\n"
+        f"\"**{old_name}**, you have trained hard and proven yourself loyal and brave.\"\n\n"
+        f"\"From this moment forward, you will be known as **{new_name}**.\"\n\n"
+        f"\"StarClan honors your courage and welcomes you as a full warrior.\"\n\n"
+        f"🔥 **{new_name} feels a surge of strength and confidence!**\n"
+        f"(+Stat boosts & temporary buff for this moon)\n\n"
+        f"🎉 **{new_name}! {new_name}! {new_name}!**"
     )
 
     await interaction.response.send_message(ceremony)
@@ -642,7 +599,6 @@ async def profile(interaction: discord.Interaction):
         await interaction.response.send_message("❌ You don't have a character yet. Use /kit.")
         return
 
-    # Build name and basic info
     name = f"{char['prefix']}{char.get('suffix','')}"
     rank = char.get("rank", "unknown")
     clan = char.get("clan", "None")
@@ -652,26 +608,7 @@ async def profile(interaction: discord.Interaction):
 
     status = "Alive 🐾" if alive else "Dead 💀"
 
-    # Pull stats from character
-    stats = generate_stats()
-
-    strength = stats.get("strength", 0)
-    perception = stats.get("perception", 0)
-    dexterity = stats.get("dexterity", 0)
-    speed = stats.get("speed", 0)
-    intelligence = stats.get("intelligence", 0)
-    luck = stats.get("luck", 0)
-    charisma = stats.get("charisma", 0)
-
-    # Clan-specific stat
-    clan_stat_name = char.get("specialty", "Skill")
-    clan_stat_value = stats.get(clan_stat_name, 0)
-
-    mentor = char.get("mentor", "None")
-    apprentice = char.get("apprentice", "None")
-    mate = char.get("mate", "None")
-    kits = char.get("kits", [])
-    kits_str = ", ".join(kits) if kits else "None"
+    stats = char.get("stats", {})
 
     embed = discord.Embed(
         title=f"🐾 {name}",
@@ -692,25 +629,13 @@ async def profile(interaction: discord.Interaction):
     embed.add_field(
         name="📊 Stats",
         value=(
-            f"Strength: **{strength}**\n"
-            f"Perception: **{perception}**\n"
-            f"Dexterity: **{dexterity}**\n"
-            f"Speed: **{speed}**\n"
-            f"Intelligence: **{intelligence}**\n"
-            f"Luck: **{luck}**\n"
-            f"Charisma: **{charisma}**\n"
-            f"{clan_stat_name.capitalize()}: **{clan_stat_value}**"
-        ),
-        inline=False
-    )
-
-    embed.add_field(
-        name="Relationships",
-        value=(
-            f"Mentor: **{mentor}**\n"
-            f"Apprentice: **{apprentice}**\n"
-            f"Mate: **{mate}**\n"
-            f"Kits: **{kits_str}**"
+            f"Strength: **{stats.get('strength', 0)}**\n"
+            f"Perception: **{stats.get('perception', 0)}**\n"
+            f"Dexterity: **{stats.get('dexterity', 0)}**\n"
+            f"Speed: **{stats.get('speed', 0)}**\n"
+            f"Intelligence: **{stats.get('intelligence', 0)}**\n"
+            f"Luck: **{stats.get('luck', 0)}**\n"
+            f"Charisma: **{stats.get('charisma', 0)}**"
         ),
         inline=False
     )
