@@ -1,8 +1,14 @@
 import discord
-from discord.ext import commands
+from discord.ext import commands, tasks
 from discord import app_commands
 import os
 import random
+import hashlib
+import json
+from pathlib import Path
+from discord.ui import View, Button
+import time
+import asyncio
 
 TOKEN = os.environ["TOKEN"]
 
@@ -10,12 +16,43 @@ intents = discord.Intents.default()
 intents.members = True
 bot = commands.Bot(command_prefix="!", intents=intents)
 
+# Background task for automatic aging
+@tasks.loop(hours=1)
+async def automatic_aging_task():
+    """Run every hour to check for character aging"""
+    try:
+        aged = apply_automatic_aging()
+        
+        if aged:
+            print(f"✨ {len(aged)} characters aged automatically!")
+            save_game_state()
+    except Exception as e:
+        print(f"❌ Error in automatic aging task: {e}")
+
+# Background task for season cycling
+@tasks.loop(hours=24)
+async def season_cycling_task():
+    """Run daily to cycle through seasons"""
+    try:
+        old_season = season
+        new_season = cycle_season()
+        
+        if old_season != new_season:
+            print(f"🌍 Season changed: {old_season} → {new_season}")
+            # You could trigger season-specific events here
+            save_game_state()
+    except Exception as e:
+        print(f"❌ Error in season cycling task: {e}")
+
+
 # ----------------------- GLOBALS -----------------------
 characters = {}
 pending_hunts = {}
 pending_battles = {}
+pending_breeding = {}
 battle_state = {}
 pregnancies = {}
+custom_clans = {}
 camp_quality = {"Thunder": 75, "River": 75, "Shadow": 75, "Wind": 75}
 # ----------------------- INITIAL CLAN PREY -----------------------
 # Each clan starts with some prey so kits can eat
@@ -34,6 +71,13 @@ fresh_kill_piles = {
 }
 seasons = ["newleaf", "greenleaf", "leaf-fall", "leafbare"]
 season = "greenleaf"
+
+seasonal_pregnancy_modifiers = {
+    "newleaf": {"health_mult": 1.1, "max_kits": 5},
+    "greenleaf": {"health_mult": 1.0, "max_kits": 4},
+    "leaf-fall": {"health_mult": 0.9, "max_kits": 4},
+    "leafbare": {"health_mult": 0.8, "max_kits": 3}
+}
 
 prey_tables = {
     "Thunder": {"greenleaf": {"mouse":2,"vole":2,"squirrel":3,"rabbit":5},
@@ -63,26 +107,297 @@ clan_specialties = {
 
 MOVES = {
     "Thunder": [
-        {"name": "Claw Swipe", "type": "physical", "damage": 15},
-        {"name": "Pounce", "type": "physical", "damage": 20},
+        {"name": "Claw Swipe", "type": "physical", "stat_multiplier": {"strength": 0.5}},
+        {"name": "Pounce", "type": "physical", "stat_multiplier": {"strength": 0.6, "speed": 0.3}},
         {"name": "Roar", "type": "status", "buff": {"defense_up": 1, "attack_down": 1}},
-        {"name": "Charge Strike", "type": "charge", "damage": 35}
+        {"name": "Charge Strike", "type": "charge", "stat_multiplier": {"strength": 1.0}}
     ],
     "River": [
-        {"name": "Water Slash", "type": "physical", "damage": 15},
-        {"name": "Dive Attack", "type": "charge", "damage": 30},
+        {"name": "Water Slash", "type": "physical", "stat_multiplier": {"speed": 0.5, "perception": 0.3}},
+        {"name": "Dive Attack", "type": "charge", "stat_multiplier": {"speed": 0.8, "dexterity": 0.4}},
         {"name": "Soothing Ripple", "type": "status", "buff": {"heal": 10}}
     ],
     "Shadow": [
-        {"name": "Shadow Pounce", "type": "physical", "damage": 20},
+        {"name": "Shadow Pounce", "type": "physical", "stat_multiplier": {"dexterity": 0.7, "speed": 0.4}},
         {"name": "Stealth Strike", "type": "status", "buff": {"attack_up": 2}}
     ],
     "Wind": [
-        {"name": "Gale Swipe", "type": "physical", "damage": 15},
-        {"name": "Whirlwind", "type": "charge", "damage": 25},
+        {"name": "Gale Swipe", "type": "physical", "stat_multiplier": {"speed": 0.6, "strength": 0.3}},
+        {"name": "Whirlwind", "type": "charge", "stat_multiplier": {"speed": 1.0}},
         {"name": "Endurance Boost", "type": "status", "buff": {"defense_up": 2}}
     ]
 }
+
+# ----------------------- BUYABLE MOVES SYSTEM (CLAN-SPECIFIC) -----------------------
+BUYABLE_MOVES = {
+    "Thunder": [
+        {"name": "⚡ Thunder Fang", "type": "physical", "stat_multiplier": {"strength": 1.2, "speed": 0.3}, "cost": 35},
+        {"name": "🌩️ Lightning Chain", "type": "charge", "stat_multiplier": {"strength": 1.5, "intelligence": 0.4}, "cost": 50},
+        {"name": "🔥 Furious Swipe", "type": "physical", "stat_multiplier": {"strength": 1.4}, "cost": 40},
+    ],
+    "River": [
+        {"name": "💧 Tidal Wave", "type": "physical", "stat_multiplier": {"speed": 1.3, "strength": 0.4}, "cost": 35},
+        {"name": "🌊 Aquatic Vortex", "type": "charge", "stat_multiplier": {"speed": 1.4, "perception": 0.3}, "cost": 50},
+        {"name": "❄️ Healing Spring", "type": "status", "buff": {"heal": 35}, "cost": 30},
+    ],
+    "Shadow": [
+        {"name": "🗡️ Shadow Slash", "type": "physical", "stat_multiplier": {"dexterity": 1.3, "speed": 0.5}, "cost": 35},
+        {"name": "💀 Darkness Engulf", "type": "charge", "stat_multiplier": {"dexterity": 1.4, "intelligence": 0.3}, "cost": 50},
+        {"name": "🌑 Shadow Cloak", "type": "status", "buff": {"defense_up": 3, "attack_up": 1}, "cost": 40},
+    ],
+    "Wind": [
+        {"name": "🌪️ Cyclone Claw", "type": "physical", "stat_multiplier": {"speed": 1.3, "dexterity": 0.4}, "cost": 35},
+        {"name": "🌀 Whirlwind Rage", "type": "charge", "stat_multiplier": {"speed": 1.5}, "cost": 50},
+        {"name": "💨 Wind's Protection", "type": "status", "buff": {"defense_up": 2, "speed": 1}, "cost": 35},
+    ]
+}
+
+# ----------------------- ACTIVITY POINTS SYSTEM -----------------------
+activity_points = {}  # Track activity points per user
+ACTIVITY_POINTS_REWARD = 5  # Points per message
+AGE_UP_COST = 500  # Points to age up one moon (very expensive - mainly for skipping ahead)
+TRAINING_SESSION_COST = 15  # Points to train once
+
+# ----------------------- AUTOMATIC AGING SYSTEM -----------------------
+# Each week of real time = 1 moon of character aging
+MOON_DURATION_SECONDS = 7 * 24 * 60 * 60  # 1 week = 1 moon (can adjust for testing)
+
+# ----------------------- HEALING ITEMS SYSTEM -----------------------
+healing_consumables = {}  # Track consumable healings owned by users: {user_id: {"herb_name": count}}
+one_time_purchases = {}  # Track one-time purchases: {user_id: ["item_name"]}
+
+HEALING_ITEMS = {
+    "consumable": [
+        {"name": "🌿 Healing Herb", "heal": 20, "cost": 8, "max_stack": 999},
+        {"name": "🍃 Moonflower Petals", "heal": 35, "cost": 15, "max_stack": 999},
+    ],
+    "one_time": [
+        {"name": "⭐ Legendary Elixir", "heal": 100, "cost": 200},  # Very expensive, full heal
+    ]
+}
+
+# ----------------------- RANDOM EVENTS SYSTEM -----------------------
+clan_events = {}  # Track recent events: {clan_name: [{"event": name, "description": str, "timestamp": time}]}
+
+RANDOM_EVENTS = {
+    "MINOR": [
+        {
+            "name": "🦊 Fox Prowls the Camp",
+            "description": "A fox attacked the camp! A few kits went missing.",
+            "effect": lambda clan: {
+                "camp_quality": -5,
+                "clan_prey_piles": -2,
+            }
+        },
+        {
+            "name": "🦡 Badger Territory Dispute",
+            "description": "A badger wandered into clan territory. Minor skirmish ensued.",
+            "effect": lambda clan: {
+                "camp_quality": -3,
+                "health_damage_random": 2,  # 2 random clan members lose 10 health
+            }
+        },
+        {
+            "name": "🍂 Leaf-Bare Chill",
+            "description": "An unexpected cold snap struck. Prey became harder to find.",
+            "effect": lambda clan: {
+                "clan_prey_piles": -3,
+                "camp_quality": -2,
+            }
+        },
+        {
+            "name": "🌱 Abundant Flowering",
+            "description": "Unusual bounty of seeds and berries! The herb supply improved.",
+            "effect": lambda clan: {
+                "camp_quality": 8,
+            }
+        },
+        {
+            "name": "🐦 Migration Season",
+            "description": "Birds passed through in large numbers. Hunting was easy!",
+            "effect": lambda clan: {
+                "clan_prey_piles": 5,
+            }
+        },
+        {
+            "name": "🦠 Minor Illness Outbreak",
+            "description": "A few cats caught a mild sickness. They recovered quickly.",
+            "effect": lambda clan: {
+                "health_damage_random": 3,  # 3 random clan members lose 5 health
+            }
+        },
+    ],
+    "MODERATE": [
+        {
+            "name": "🔥 Camp Fire",
+            "description": "A fire broke out in the camp! Several nests were destroyed.",
+            "effect": lambda clan: {
+                "camp_quality": -25,
+                "clan_prey_piles": -8,
+                "health_damage_random": 5,  # 5 random members lose 15 health
+            }
+        },
+        {
+            "name": "🌊 Heavy Rainfall",
+            "description": "Torrential rains flooded parts of the territory. Nests ruined.",
+            "effect": lambda clan: {
+                "camp_quality": -20,
+                "clan_prey_piles": -6,
+            }
+        },
+        {
+            "name": "⚔️ Rival Clan Attack",
+            "description": "A rival clan raided the territory! Fierce battle ensued.",
+            "effect": lambda clan: {
+                "camp_quality": -15,
+                "health_damage_random": 8,  # 8 random members lose health
+            }
+        },
+        {
+            "name": "💀 Epidemic",
+            "description": "Disease swept through the clan! Many fell ill.",
+            "effect": lambda clan: {
+                "camp_quality": -12,
+                "health_damage_random": 12,  # Major health impact
+            }
+        },
+        {
+            "name": "🌳 Tree Down",
+            "description": "A massive tree fell in a storm. The camp was damaged.",
+            "effect": lambda clan: {
+                "camp_quality": -18,
+                "clan_prey_piles": -4,
+            }
+        },
+        {
+            "name": "🐺 Wolf Pack Warning",
+            "description": "Wolves were spotted near clan territory. Patrols increased.",
+            "effect": lambda clan: {
+                "camp_quality": -10,
+            }
+        },
+    ],
+    "MAJOR": [
+        {
+            "name": "🌋 Catastrophic Fire",
+            "description": "A massive wildfire destroyed the entire camp! The clan must rebuild from nothing.",
+            "effect": lambda clan: {
+                "camp_quality": -50,
+                "clan_prey_piles": -15,
+                "health_damage_random": 15,  # Devastating health damage
+            }
+        },
+        {
+            "name": "💧 Great Flood",
+            "description": "Flash floods devastated the territory! Nests destroyed, prey scattered.",
+            "effect": lambda clan: {
+                "camp_quality": -45,
+                "clan_prey_piles": -12,
+            }
+        },
+        {
+            "name": "🐻 Bear Invasion",
+            "description": "A massive bear attacked the clan! Severe casualties and destruction.",
+            "effect": lambda clan: {
+                "camp_quality": -40,
+                "health_damage_random": 20,  # Very high damage - potentially lethal
+            }
+        },
+        {
+            "name": "🦅 Eagle Attacks Nursery",
+            "description": "An enormous eagle attacked the nursery multiple times. Kits were lost.",
+            "effect": lambda clan: {
+                "camp_quality": -30,
+                "clan_prey_piles": -5,
+                "health_damage_random": 7,  # Targets young cats especially
+            }
+        },
+        {
+            "name": "❄️ Harsh Winter",
+            "description": "The winter was crueler than expected. Starvation threatened the clan.",
+            "effect": lambda clan: {
+                "camp_quality": -35,
+                "clan_prey_piles": -20,
+                "hunger_increase_all": 20,  # All clan members get hungrier
+            }
+        },
+        {
+            "name": "🌊 Drought",
+            "description": "A terrible drought struck. Water and food became scarce across the entire region.",
+            "effect": lambda clan: {
+                "camp_quality": -30,
+                "clan_prey_piles": -18,
+                "hunger_increase_all": 15,
+            }
+        },
+    ]
+}
+
+# ----------------------- SAVE/LOAD SYSTEM -----------------------
+SAVE_FILE = Path("game_state.json")
+
+def save_game_state():
+    """Save all game state to JSON file"""
+    state = {
+        "characters": characters,
+        "pending_hunts": pending_hunts,
+        "pending_battles": pending_battles,
+        "pending_breeding": pending_breeding,
+        "battle_state": {str(k): v for k, v in battle_state.items()},
+        "pregnancies": pregnancies,
+        "custom_clans": custom_clans,
+        "camp_quality": camp_quality,
+        "clan_prey_piles": clan_prey_piles,
+        "fresh_kill_piles": fresh_kill_piles,
+        "season": season,
+        "activity_points": {str(k): v for k, v in activity_points.items()},
+        "healing_consumables": {str(k): v for k, v in healing_consumables.items()},
+        "one_time_purchases": {str(k): v for k, v in one_time_purchases.items()},
+        "clan_events": clan_events
+    }
+    with open(SAVE_FILE, "w") as f:
+        json.dump(state, f, indent=2)
+    print("✅ Game state saved!")
+
+def load_game_state():
+    """Load game state from JSON file if it exists"""
+    global characters, pending_hunts, pending_battles, pending_breeding
+    global battle_state, pregnancies, custom_clans, camp_quality
+    global clan_prey_piles, fresh_kill_piles, season, activity_points
+    global healing_consumables, one_time_purchases, clan_events
+    
+    if not SAVE_FILE.exists():
+        print("📂 No save file found. Starting fresh!")
+        return
+    
+    try:
+        with open(SAVE_FILE, "r") as f:
+            state = json.load(f)
+        
+        characters = state.get("characters", {})
+        pending_hunts = state.get("pending_hunts", {})
+        pending_battles = state.get("pending_battles", {})
+        pending_breeding = state.get("pending_breeding", {})
+        battle_state = {eval(k): v for k, v in state.get("battle_state", {}).items()}
+        pregnancies = state.get("pregnancies", {})
+        custom_clans = state.get("custom_clans", {})
+        camp_quality = state.get("camp_quality", {"Thunder": 75, "River": 75, "Shadow": 75, "Wind": 75})
+        clan_prey_piles = state.get("clan_prey_piles", {"Thunder": 20, "River": 20, "Shadow": 20, "Wind": 20})
+        fresh_kill_piles = state.get("fresh_kill_piles", {
+            "Thunder": ["mouse", "rabbit", "vole"],
+            "River": ["fish", "frog", "water vole"],
+            "Shadow": ["rat", "lizard", "frog"],
+            "Wind": ["rabbit", "hare", "mouse"]
+        })
+        season = state.get("season", "greenleaf")
+        activity_points = {int(k): v for k, v in state.get("activity_points", {}).items()}
+        healing_consumables = {int(k): v for k, v in state.get("healing_consumables", {}).items()}
+        one_time_purchases = {int(k): v for k, v in state.get("one_time_purchases", {}).items()}
+        clan_events = state.get("clan_events", {})
+        
+        print(f"✅ Game state loaded! Found {len(characters)} characters.")
+    except Exception as e:
+        print(f"❌ Error loading save file: {e}")
 
 # ----------------------- UTILITY FUNCTIONS -----------------------
 def generate_stats():
@@ -182,7 +497,7 @@ def pregnancy_train_allowed(char):
 
 def apply_pregnancy_effects(char):
     if not char.get("pregnant"):
-         return 1.0
+        return 1.0
 
     stage = char["pregnant"].get("months", 0)
 
@@ -192,61 +507,418 @@ def apply_pregnancy_effects(char):
         return 0.8
     else:
         return 0.6
-        # Seasonal modifier
-        season_mod = seasonal_pregnancy_modifiers.get(season, {"health_mult": 1.0, "max_kits": 4})
-        seasonal_pregnancy_modifiers = {
-    "newleaf": {"health_mult": 1.1, "max_kits": 5},
-    "greenleaf": {"health_mult": 1.0, "max_kits": 4},
-    "leaf-fall": {"health_mult": 0.9, "max_kits": 4},
-    "leafbare": {"health_mult": 0.8, "max_kits": 3}
-        }
 
-        # Increase hunger due to pregnancy
-        carrier["hunger"] = min(100, carrier["hunger"] + 10)
+def calculate_stat_damage(char, stat_multiplier):
+    """Calculate damage based on character stats and multipliers"""
+    if not stat_multiplier:
+        return 0
+    
+    stats = char.get("stats", {})
+    base_damage = 10  # Base damage for all moves
+    stat_damage = 0
+    
+    # Calculate damage from each stat
+    for stat_name, multiplier in stat_multiplier.items():
+        stat_value = stats.get(stat_name, 0)
+        stat_damage += stat_value * multiplier * 3  # 3x damage scaling from stats
+    
+    total_damage = int(base_damage + stat_damage)
+    
+    # Add hunger modifier
+    hunger = char.get("hunger", 50)
+    if hunger < 30:
+        total_damage -= 5
+    elif hunger < 50:
+        total_damage -= 2
+    elif hunger >= 80:
+        total_damage -= 1
+    
+    return max(1, total_damage)
 
-        # Factor in exhaustion, training, and camp quality
-        exhaustion = carrier.get("exhaustion", 0)
-        training = carrier.get("training_sessions", 0)
-        camp = camp_quality.get(carrier["clan"], 50)
+def create_progress_bar(current, max_val, bar_length=20):
+    """Create a visual progress bar for Discord embeds"""
+    if max_val <= 0:
+        percentage = 0
+    else:
+        percentage = int((current / max_val) * 100)
+    
+    filled = int((current / max_val) * bar_length) if max_val > 0 else 0
+    empty = bar_length - filled
+    
+    # Choose emoji based on percentage
+    if percentage >= 80:
+        emoji = "🟩"
+    elif percentage >= 50:
+        emoji = "🟨"
+    elif percentage >= 25:
+        emoji = "🟧"
+    else:
+        emoji = "🟥"
+    
+    bar = emoji * filled + "⬜" * empty
+    return f"{bar} {percentage}%"
 
-        base_kit_health = max(0, 100 - (exhaustion * 5 + training * 5))
-        kit_health = int(base_kit_health * season_mod["health_mult"])
-        data["kit_health_estimate"] = kit_health
+def get_injury_description(degree):
+    """Get injury description based on degree"""
+    injuries = {
+        0: ("None", "🟩 Healthy"),
+        1: ("Minor", "🟨 Minor wounds - slight pain"),
+        2: ("Moderate", "🟧 Moderate wounds - noticeable pain"),
+        3: ("Severe", "🟥 Severe wounds - significant pain"),
+        4: ("Critical", "💀 Critical condition - needs urgent healing")
+    }
+    return injuries.get(degree, ("Unknown", "❓ Unknown status"))
 
-        # Check if pregnancy is complete
-        current_moon = carrier.get("moons", 0)
-        if current_moon - data["start_moon"] >= 5:
-            # Number of kits depends on camp + season + mother condition
-            max_kits = season_mod["max_kits"]
-            kit_count = max(1, min(max_kits, int((camp/25) * (kit_health/50))))
-            data["kit_count"] = kit_count
+def update_injury_degree(char):
+    """Update injury degree based on health percentage"""
+    health = char.get("health", 100)
+    
+    if health >= 80:
+        char["injury_degree"] = 0
+    elif health >= 60:
+        char["injury_degree"] = 1
+    elif health >= 40:
+        char["injury_degree"] = 2
+    elif health >= 20:
+        char["injury_degree"] = 3
+    else:
+        char["injury_degree"] = 4
 
-            # Reset mother's status
-            data["active"] = False
-            carrier["hunger"] = max(carrier["hunger"] - 10, 0)
+def apply_hunger_damage(char):
+    """Apply health damage if hunger is critically low"""
+    hunger = char.get("hunger", 50)
+    
+    # If hunger < 10, take health damage
+    if hunger < 10:
+        damage = max(1, 10 - hunger)  # More starving = more damage
+        char["health"] = max(0, char["health"] - damage)
+        update_injury_degree(char)
+        if char["health"] <= 0:
+            char["alive"] = False
+        return True, damage
+    
+    return False, 0
 
-            # Spawn kits
-            for _ in range(kit_count):
-                kit_stats = generate_stats()
-                kit_id = f"kit_{carrier_id}_{random.randint(1000,9999)}"
-                characters[kit_id] = {
-                    "prefix": f"{carrier['prefix']}kit",
-                    "rank": "kit",
-                    "moons": 0,
-                    "suffix": None,
-                    "clan": carrier["clan"],
-                    "health": kit_health,
-                    "stats": kit_stats,
-                    "specialty": None,
-                    "skill_value": 0,
-                    "hunger": 50
-                }
+def get_clan_members(clan_name):
+    """Get all members of a clan"""
+    members = []
+    for uid, char in characters.items():
+        if char.get("clan") == clan_name and char.get("alive", True):
+            members.append((uid, char))
+    return members
+
+def trigger_random_event(clan_name):
+    """Trigger a random event for a clan and return event details"""
+    import time
+    
+    # Determine event severity (weighted)
+    severity_roll = random.randint(1, 100)
+    if severity_roll <= 60:
+        severity = "MINOR"
+    elif severity_roll <= 90:
+        severity = "MODERATE"
+    else:
+        severity = "MAJOR"
+    
+    # Select random event from severity level
+    event = random.choice(RANDOM_EVENTS[severity])
+    effect_dict = event["effect"](clan_name)
+    
+    # Apply camp quality change
+    if "camp_quality" in effect_dict:
+        camp_quality[clan_name] = max(0, min(100, camp_quality[clan_name] + effect_dict["camp_quality"]))
+    
+    # Apply prey pile change
+    if "clan_prey_piles" in effect_dict:
+        clan_prey_piles[clan_name] = max(0, clan_prey_piles[clan_name] + effect_dict["clan_prey_piles"])
+    
+    # Apply health damage to random clan members
+    if "health_damage_random" in effect_dict:
+        members = get_clan_members(clan_name)
+        num_affected = min(effect_dict["health_damage_random"], len(members))
+        if num_affected > 0:
+            affected_members = random.sample(members, num_affected)
+            severity_damage = {"MINOR": 5, "MODERATE": 15, "MAJOR": 25}
+            damage_amount = severity_damage[severity]
+            for uid, member in affected_members:
+                member["health"] = max(0, member["health"] - damage_amount)
+                update_injury_degree(member)
+                if member["health"] <= 0:
+                    member["alive"] = False
+    
+    # Apply hunger increase to all clan members
+    if "hunger_increase_all" in effect_dict:
+        for uid, member in get_clan_members(clan_name):
+            member["hunger"] = min(100, member["hunger"] + effect_dict["hunger_increase_all"])
+    
+    # Record event in history
+    if clan_name not in clan_events:
+        clan_events[clan_name] = []
+    
+    clan_events[clan_name].append({
+        "event": event["name"],
+        "description": event["description"],
+        "severity": severity,
+        "timestamp": int(time.time())
+    })
+    
+    # Keep only last 20 events per clan
+    if len(clan_events[clan_name]) > 20:
+        clan_events[clan_name] = clan_events[clan_name][-20:]
+    
+    return event, severity, effect_dict
+
+def age_character_moon(char):
+    """Age a character by one moon and handle associated changes"""
+    char["moons"] = char.get("moons", 0) + 1
+    char["hunger"] = max(char.get("hunger", 100) - 10, 0)
+    char["last_aged"] = time.time()
+    
+    return char["moons"]
+
+def cycle_season():
+    """Progress to next season"""
+    global season
+    season_index = seasons.index(season)
+    season = seasons[(season_index + 1) % len(seasons)]
+    return season
+
+def apply_automatic_aging():
+    """Check all characters and age them if enough time has passed"""
+    current_time = time.time()
+    aged_characters = []
+    
+    for uid, char in characters.items():
+        if not char.get("alive", True):
+            continue
+        
+        last_aged = char.get("last_aged", current_time)
+        time_passed = current_time - last_aged
+        
+        # Check if enough time has passed for aging
+        moons_passed = int(time_passed / MOON_DURATION_SECONDS)
+        
+        if moons_passed > 0:
+            for _ in range(moons_passed):
+                new_moon = age_character_moon(char)
+            
+            aged_characters.append((uid, char, moons_passed))
+    
+    return aged_characters
+
+def generate_clan_colors(clan_name):
+    base_hash = int(hashlib.md5(clan_name.encode()).hexdigest(), 16)
+
+    colors = []
+    for i in range(4):
+        r = (base_hash >> (i * 6)) & 0xFF
+        g = (base_hash >> (i * 12)) & 0xFF
+        b = (base_hash >> (i * 18)) & 0xFF
+
+        r = (r % 156) + 100
+        g = (g % 156) + 100
+        b = (b % 156) + 100
+
+        colors.append(discord.Color.from_rgb(r, g, b))
+
+    return colors
+
+
+@bot.tree.command(name="create_clan", description="Create a new clan (Admin only)")
+@app_commands.checks.has_permissions(administrator=True)
+async def create_clan(interaction: discord.Interaction, clan_name: str, leader: discord.Member):
+
+    creator_id = interaction.user.id
+    guild = interaction.guild
+
+    # ---------------- VALIDATION ----------------
+    if creator_id not in characters:
+        await interaction.response.send_message("❌ You need a character.")
+        return
+
+    if leader.id not in characters:
+        await interaction.response.send_message("❌ That user doesn't have a character.")
+        return
+
+    if characters[leader.id].get("is_leader"):
+        await interaction.response.send_message("⚠️ That user is already a leader.")
+        return
+
+    clan_name = clan_name.capitalize()
+
+    if clan_name in clan_specialties:
+        await interaction.response.send_message("❌ That clan already exists.")
+        return
+
+    colors = generate_clan_colors(clan_name)
+
+    # ---------------- COLOR MENU ----------------
+    async def show_color_options(i):
+        view = View(timeout=180)
+
+        for idx, color in enumerate(colors):
+
+            btn = Button(label=f"Color {idx+1}", style=discord.ButtonStyle.secondary)
+
+            async def pick_callback(inter, chosen=color):
+                if inter.user.id != creator_id:
+                    await inter.response.send_message("❌ Only the creator can choose.", ephemeral=True)
+                    return
+
+                await show_preview(inter, chosen)
+
+            btn.callback = pick_callback
+            view.add_item(btn)
+
+        await i.response.edit_message(
+            content=f"🎨 Choose a color for **{clan_name}Clan**:",
+            embed=None,
+            view=view
+        )
+
+    # ---------------- PREVIEW ----------------
+    async def show_preview(i, chosen_color):
+        view = View(timeout=180)
+
+        embed = discord.Embed(
+            title=f"{clan_name}Clan Preview",
+            description=f"👑 Leader: {characters[leader.id]['prefix']}",
+            color=chosen_color
+        )
+
+        embed.add_field(
+            name="Confirm Clan Creation",
+            value="Press **Confirm** to create the clan or **Pick Another** to choose again."
+        )
+
+        # ✅ CONFIRM
+        async def confirm(inter):
+            if inter.user.id != creator_id:
+                await inter.response.send_message("❌ Only the creator can confirm.", ephemeral=True)
+                return
+
+            role_name = f"{clan_name}Clan"
+
+            role = discord.utils.get(guild.roles, name=role_name)
+            if not role:
+                role = await guild.create_role(
+                    name=role_name,
+                    colour=chosen_color,
+                    mentionable=True,
+                    hoist=True
+                )
+
+            # Remove old clan roles
+            clan_roles = [r for r in guild.roles if r.name.endswith("Clan")]
+            member_obj = guild.get_member(leader.id)
+
+            for r in clan_roles:
+                if r in member_obj.roles:
+                    await member_obj.remove_roles(r)
+
+            await member_obj.add_roles(role)
+
+            # Assign character
+            char = characters[leader.id]
+            char["clan"] = clan_name
+            char["rank"] = "leader"
+            char["is_leader"] = True
+
+            # ✅ FIXED specialty (important)
+            clan_specialties[clan_name] = "adaptability"
+
+            # Save clan
+            custom_clans[clan_name] = {"leader": leader.id}
+            clan_prey_piles[clan_name] = 20
+            fresh_kill_piles[clan_name] = ["mouse", "rabbit"]
+
+            prey_tables[clan_name] = {
+                "greenleaf": {"mouse": 2, "rabbit": 4},
+                "leafbare": {"mouse": 2}
+            }
+
+            camp_quality[clan_name] = 75
+
+            await inter.response.edit_message(
+                content=f"🌟 **{clan_name}Clan has been created!**\n👑 Leader: **{char['prefix']}**",
+                embed=None,
+                view=None
+            )
+            save_game_state()
+
+        # ❌ DENY
+        async def deny(inter):
+            if inter.user.id != creator_id:
+                await inter.response.send_message("❌ Only the creator can deny.", ephemeral=True)
+                return
+
+            await show_color_options(inter)
+
+        confirm_btn = Button(label="Confirm", style=discord.ButtonStyle.green)
+        deny_btn = Button(label="Pick Another", style=discord.ButtonStyle.red)
+
+        confirm_btn.callback = confirm
+        deny_btn.callback = deny
+
+        view.add_item(confirm_btn)
+        view.add_item(deny_btn)
+
+        await i.response.edit_message(embed=embed, view=view)
+
+    # ---------------- INITIAL BUTTONS ----------------
+    view = View(timeout=180)
+
+    for idx, color in enumerate(colors):
+        btn = Button(label=f"Color {idx+1}", style=discord.ButtonStyle.secondary)
+
+        async def callback(i, chosen=color):
+            if i.user.id != creator_id:
+                await i.response.send_message("❌ Only the creator can choose.", ephemeral=True)
+                return
+
+            await show_preview(i, chosen)
+
+        btn.callback = callback
+        view.add_item(btn)
+
+    await interaction.response.send_message(
+        f"🎨 Choose a color for **{clan_name}Clan**:",
+        view=view
+    )
 # ----------------------- EVENTS -----------------------
 @bot.event
 async def on_ready():
     synced = await bot.tree.sync()
     print(f"Synced {len(synced)} commands globally")
     print(f"{bot.user} is online!")
+    load_game_state()  # Load saved game state on startup
+    
+    # Start background tasks
+    if not automatic_aging_task.is_running():
+        automatic_aging_task.start()
+        print("✅ Automatic aging task started")
+    
+    if not season_cycling_task.is_running():
+        season_cycling_task.start()
+        print("✅ Season cycling task started")
+
+@bot.event
+async def on_message(message):
+    """Track activity and award points for messages"""
+    # Ignore bot messages
+    if message.author.bot:
+        return
+    
+    uid = message.author.id
+    
+    # Award activity points for non-command messages
+    if not message.content.startswith("/"):
+        if uid not in activity_points:
+            activity_points[uid] = 0
+        activity_points[uid] += ACTIVITY_POINTS_REWARD
+    
+    await bot.process_commands(message)
+
 # ----------------------- CHARACTER CREATION -----------------------
 @bot.tree.command(name="kit", description="Create your kit")
 async def kit(interaction: discord.Interaction, prefix: str):
@@ -256,6 +928,7 @@ async def kit(interaction: discord.Interaction, prefix: str):
         return
 
     stats = generate_stats()
+    current_time = time.time()
     characters[uid] = {
         "prefix": prefix,
         "rank": "kit",
@@ -269,12 +942,15 @@ async def kit(interaction: discord.Interaction, prefix: str):
         "hunger": 50,
         "training_sessions": 0,
         "exhaustion": 0,
-        "alive": True
+        "alive": True,
+        "injury_degree": 0,  # 0=none, 1=minor, 2=moderate, 3=severe, 4=critical
+        "last_aged": current_time  # Track when character was last aged
     }
 
     await interaction.response.send_message(
         f"🐾 **{prefix}kit** has been born!"
     )
+    save_game_state()
 # ----------------------- PREGNANCY SYSTEM -----------------------
 # Pregnancy rules:
 # - Full warriors, 12 moons minimum
@@ -365,6 +1041,7 @@ async def propose_breeding(interaction: discord.Interaction, partner: discord.Me
         pending_breeding.pop((uid, pid), None)
 
         await i.response.edit_message(content=f"🌱 Pregnancy begun! **{mother['prefix']}** is carrying kits.", view=None)
+        save_game_state()
 
     async def decline(i):
         if i.user.id != pid:
@@ -451,7 +1128,17 @@ async def age(interaction: discord.Interaction):
 
             char["pregnant"] = None
 
+    # Check for starvation damage
+    damage_applied, damage_amount = apply_hunger_damage(char)
+    if damage_applied:
+        message += f"\n⚠️ **{char['prefix']} suffered {damage_amount} damage from starvation!**"
+        if not char["alive"]:
+            message += " **💀 They did not survive!**"
+    
+    update_injury_degree(char)
+
     await interaction.response.send_message(message)
+    save_game_state()
     
 @bot.tree.command(name="choose_suffix", description="Choose your future warrior suffix")
 async def choose_suffix(interaction: discord.Interaction, suffix: str):
@@ -479,8 +1166,6 @@ async def choose_suffix(interaction: discord.Interaction, suffix: str):
     await interaction.response.send_message(
         f"🌟 Your future warrior name will be **{char['prefix']}{suffix}** when you are promoted."
     )
-    
-    await interaction.response.send_message(embed=embed)
     
 @bot.tree.command(name="make_warrior", description="Promote an apprentice to warrior")
 async def make_warrior(interaction: discord.Interaction, member: discord.Member):
@@ -559,6 +1244,7 @@ async def make_warrior(interaction: discord.Interaction, member: discord.Member)
     )
 
     await interaction.response.send_message(ceremony)
+    save_game_state()
 # ----------------------- TAKE PREY -----------------------
 @bot.tree.command(name="take_prey", description="Take prey from the clan pile to eat")
 async def take_prey(interaction: discord.Interaction):
@@ -589,6 +1275,7 @@ async def take_prey(interaction: discord.Interaction):
         f"🍖 You took prey from the pile and ate.\n"
         f"Hunger: **{char['hunger']}/100**"
     )
+    save_game_state()
 # ----------------------- PROFILE -----------------------
 @bot.tree.command(name="profile", description="View your character profile")
 async def profile(interaction: discord.Interaction):
@@ -604,9 +1291,14 @@ async def profile(interaction: discord.Interaction):
     clan = char.get("clan", "None")
     moons = char.get("moons", 0)
     hunger = char.get("hunger", 0)
+    health = char.get("health", 100)
     alive = char.get("alive", True)
 
     status = "Alive 🐾" if alive else "Dead 💀"
+
+    # Create progress bars
+    health_bar = create_progress_bar(health, 100)
+    hunger_bar = create_progress_bar(hunger, 100)
 
     stats = char.get("stats", {})
 
@@ -616,11 +1308,34 @@ async def profile(interaction: discord.Interaction):
         color=discord.Color.green()
     )
 
+    # Health & Status section
     embed.add_field(
-        name="Basic Info",
+        name="❤️ Health",
+        value=f"{health_bar}\n**{health}/100 HP**",
+        inline=False
+    )
+
+    # Hunger section
+    embed.add_field(
+        name="🍖 Hunger",
+        value=f"{hunger_bar}\n**{hunger}/100**",
+        inline=False
+    )
+
+    # Injury Status
+    injury_degree = char.get("injury_degree", 0)
+    injury_description = get_injury_description(injury_degree)
+    embed.add_field(
+        name="🩹 Injury Status",
+        value=injury_description,
+        inline=False
+    )
+
+    # Basic Info
+    embed.add_field(
+        name="📋 Basic Info",
         value=(
             f"Age: **{moons} moons**\n"
-            f"Hunger: **{hunger}/100**\n"
             f"Status: **{status}**"
         ),
         inline=False
@@ -641,6 +1356,411 @@ async def profile(interaction: discord.Interaction):
     )
 
     await interaction.response.send_message(embed=embed)
+
+# ----------------------- ACTIVITY POINTS COMMANDS -----------------------
+@bot.tree.command(name="my_points", description="Check your activity points")
+async def my_points(interaction: discord.Interaction):
+    uid = interaction.user.id
+    if uid not in characters:
+        await interaction.response.send_message("❌ You don't have a character yet. Use /kit.")
+        return
+    
+    points = activity_points.get(uid, 0)
+    char = characters[uid]
+    
+    embed = discord.Embed(
+        title=f"🌟 {char['prefix']}'s Activity Points",
+        description=f"You have **{points}** activity points!",
+        color=discord.Color.gold()
+    )
+    
+    embed.add_field(
+        name="💰 Shop Prices",
+        value=(
+            f"• Age up 1 moon: **{AGE_UP_COST} points**\n"
+            f"• Train once: **{TRAINING_SESSION_COST} points**"
+        ),
+        inline=False
+    )
+    
+    await interaction.response.send_message(embed=embed)
+
+@bot.tree.command(name="battle_moves", description="See all buyable battle moves for your clan")
+async def battle_moves(interaction: discord.Interaction):
+    uid = interaction.user.id
+    if uid not in characters:
+        await interaction.response.send_message("❌ You don't have a character. Use /kit to create one.")
+        return
+    
+    char = characters[uid]
+    clan = char.get("clan", "Unknown")
+    points = activity_points.get(uid, 0)
+    
+    # Get clan-specific moves
+    clan_moves = BUYABLE_MOVES.get(clan, [])
+    
+    if not clan_moves:
+        await interaction.response.send_message(f"❌ {clan}Clan has no special moves available. Join a clan first with /clan!")
+        return
+    
+    embed = discord.Embed(
+        title=f"⚔️ {clan}Clan Battle Moves",
+        description=f"💰 You have **{points}** activity points\n\nUse these moves in battle via the **Move Shop** button!",
+        color=discord.Color.red()
+    )
+    
+    physical_moves = [m for m in clan_moves if m["type"] == "physical"]
+    charge_moves = [m for m in clan_moves if m["type"] == "charge"]
+    status_moves = [m for m in clan_moves if m["type"] == "status"]
+    
+    if physical_moves:
+        embed.add_field(
+            name="💥 Physical Moves",
+            value="\n".join([f"• {m['name']} - **{m['cost']}pts**" for m in physical_moves]),
+            inline=False
+        )
+    
+    if charge_moves:
+        embed.add_field(
+            name="⚡ Charge Moves (2-turn)",
+            value="\n".join([f"• {m['name']} - **{m['cost']}pts**" for m in charge_moves]),
+            inline=False
+        )
+    
+    if status_moves:
+        embed.add_field(
+            name="✨ Support Moves",
+            value="\n".join([f"• {m['name']} - **{m['cost']}pts**" for m in status_moves]),
+            inline=False
+        )
+    
+    embed.set_footer(text="💡 Damage scales with your stats! Higher stats = higher damage!")
+    
+    await interaction.response.send_message(embed=embed)
+
+@bot.tree.command(name="age_with_points", description="Spend points to age up")
+async def age_with_points(interaction: discord.Interaction):
+    uid = interaction.user.id
+    if uid not in characters:
+        await interaction.response.send_message("❌ You don't have a character.")
+        return
+    
+    points = activity_points.get(uid, 0)
+    if points < AGE_UP_COST:
+        await interaction.response.send_message(
+            f"❌ Not enough points! You have **{points}/{AGE_UP_COST}** points needed."
+        )
+        return
+    
+    char = characters[uid]
+    
+    # Deduct points
+    activity_points[uid] -= AGE_UP_COST
+    
+    # Age up the character
+    char["moons"] = char.get("moons", 0) + 1
+    char["hunger"] = max(char.get("hunger", 100) - 10, 0)
+    
+    message = f"🌙 **{char['prefix']}** is now **{char['moons']} moons old!**"
+    
+    # Apprentice milestone
+    if char["moons"] == 6:
+        message += "\n🐾 You are **old enough to become an apprentice!** Ask a leader for training."
+    
+    # Warrior eligibility
+    if char["moons"] == 12:
+        message += "\n⭐ You are **eligible to become a warrior!** A leader may perform your warrior ceremony."
+    
+    # Pregnancy progression
+    if char.get("pregnant"):
+        char["pregnant"]["months"] += 1
+        months = char["pregnant"]["months"]
+        message += f"\n🤰 Pregnancy progressed to **{months}/5 moons**."
+        
+        if months >= 5:
+            kits = random.randint(1, 4)
+            message += f"\n🐣 **{char['prefix']} has given birth to {kits} kits!**"
+            char["pregnant"] = None
+    
+    # Check for starvation damage
+    damage_applied, damage_amount = apply_hunger_damage(char)
+    if damage_applied:
+        message += f"\n⚠️ **{char['prefix']} suffered {damage_amount} damage from starvation!**"
+        if not char["alive"]:
+            message += " **💀 They did not survive!**"
+    
+    update_injury_degree(char)
+    
+    message += f"\n\n💸 Spent {AGE_UP_COST} points! Remaining: **{activity_points[uid]}**"
+    
+    await interaction.response.send_message(message)
+    save_game_state()
+
+@bot.tree.command(name="train_with_points", description="Spend points to train")
+async def train_with_points(interaction: discord.Interaction):
+    uid = interaction.user.id
+    if uid not in characters:
+        await interaction.response.send_message("❌ You don't have a character.")
+        return
+    
+    points = activity_points.get(uid, 0)
+    if points < TRAINING_SESSION_COST:
+        await interaction.response.send_message(
+            f"❌ Not enough points! You have **{points}/{TRAINING_SESSION_COST}** points needed."
+        )
+        return
+    
+    char = characters[uid]
+    
+    if not char.get("alive", True):
+        await interaction.response.send_message("❌ Your character is dead.")
+        return
+    
+    if not pregnancy_train_allowed(char):
+        await interaction.response.send_message("⚠️ You are too far along in pregnancy to train safely.")
+        return
+    
+    # Deduct points
+    activity_points[uid] -= TRAINING_SESSION_COST
+    
+    # Train the character
+    char["strength"] = char.get("strength", 10) + 1
+    char["training_sessions"] = char.get("training_sessions", 0) + 1
+    hunger_cost = -5
+    char["hunger"] = max(0, char["hunger"] + hunger_cost)
+    
+    message = f"💪 **{char['prefix']}** trains hard and gains +1 strength!\n"
+    message += f"💸 Spent {TRAINING_SESSION_COST} points! Remaining: **{activity_points[uid]}**\n"
+    message += f"Hunger: **{char['hunger']}/100**"
+    
+    await interaction.response.send_message(message)
+    save_game_state()
+
+# ----------------------- HEALING ITEMS COMMANDS -----------------------
+@bot.tree.command(name="buy_heal", description="Buy healing items with activity points")
+async def buy_heal(interaction: discord.Interaction):
+    uid = interaction.user.id
+    if uid not in characters:
+        await interaction.response.send_message("❌ You don't have a character yet. Use /kit.")
+        return
+    
+    points = activity_points.get(uid, 0)
+    
+    embed = discord.Embed(
+        title="🧪 Healing Item Shop",
+        description=f"💰 You have **{points}** activity points",
+        color=discord.Color.green()
+    )
+    
+    # Consumable items
+    embed.add_field(
+        name="📦 Consumable Items (Stackable)",
+        value="\n".join([f"• {item['name']}: **{item['heal']} HP** - {item['cost']} pts" 
+                        for item in HEALING_ITEMS["consumable"]]),
+        inline=False
+    )
+    
+    # One-time items
+    one_time_text = ""
+    for item in HEALING_ITEMS["one_time"]:
+        already_bought = item["name"] in one_time_purchases.get(uid, [])
+        status = "✅ Already Purchased" if already_bought else "⭐ Available for Purchase"
+        one_time_text += f"• {item['name']}: **{item['heal']} HP** - {item['cost']} pts [{status}]\n"
+    
+    embed.add_field(
+        name="💎 One-Time Purchases (Legendary)",
+        value=one_time_text,
+        inline=False
+    )
+    
+    embed.set_footer(text="Use /use_heal to consume a healing item outside of battle!")
+    
+    await interaction.response.send_message(embed=embed)
+
+@bot.tree.command(name="buy_consumable", description="Buy a consumable healing item")
+async def buy_consumable(interaction: discord.Interaction, item_name: str):
+    uid = interaction.user.id
+    if uid not in characters:
+        await interaction.response.send_message("❌ You don't have a character.")
+        return
+    
+    # Find the item
+    item = None
+    for h_item in HEALING_ITEMS["consumable"]:
+        if h_item["name"].lower() == item_name.lower():
+            item = h_item
+            break
+    
+    if not item:
+        await interaction.response.send_message(f"❌ Item '{item_name}' not found!")
+        return
+    
+    points = activity_points.get(uid, 0)
+    if points < item["cost"]:
+        await interaction.response.send_message(
+            f"❌ Not enough points! You have {points}, need {item['cost']}."
+        )
+        return
+    
+    # Deduct points
+    activity_points[uid] -= item["cost"]
+    
+    # Add consumable to inventory
+    if uid not in healing_consumables:
+        healing_consumables[uid] = {}
+    
+    if item["name"] not in healing_consumables[uid]:
+        healing_consumables[uid][item["name"]] = 0
+    
+    healing_consumables[uid][item["name"]] += 1
+    
+    char = characters[uid]
+    await interaction.response.send_message(
+        f"✅ Purchased **{item['name']}** (Restores {item['heal']} HP)!\n"
+        f"💸 Spent {item['cost']} points! Remaining: **{activity_points[uid]}**\n"
+        f"📦 Owned: **{healing_consumables[uid][item['name']]}**"
+    )
+    save_game_state()
+
+@bot.tree.command(name="buy_legendary", description="Buy a one-time legendary healing item")
+async def buy_legendary(interaction: discord.Interaction):
+    uid = interaction.user.id
+    if uid not in characters:
+        await interaction.response.send_message("❌ You don't have a character.")
+        return
+    
+    item = HEALING_ITEMS["one_time"][0]  # The legendary elixir
+    
+    # Check if already purchased
+    if uid in one_time_purchases and item["name"] in one_time_purchases[uid]:
+        await interaction.response.send_message(
+            f"❌ You've already purchased **{item['name']}**! It can only be bought once."
+        )
+        return
+    
+    points = activity_points.get(uid, 0)
+    if points < item["cost"]:
+        await interaction.response.send_message(
+            f"❌ Not enough points! You have {points}, need {item['cost']}."
+        )
+        return
+    
+    # Deduct points and mark as purchased
+    activity_points[uid] -= item["cost"]
+    
+    if uid not in one_time_purchases:
+        one_time_purchases[uid] = []
+    one_time_purchases[uid].append(item["name"])
+    
+    char = characters[uid]
+    await interaction.response.send_message(
+        f"🌟 **LEGENDARY PURCHASE UNLOCKED!**\n\n"
+        f"You now own **{item['name']}** (Full restoration - {item['heal']} HP)!\n"
+        f"💸 Spent {item['cost']} points! Remaining: **{activity_points[uid]}**\n"
+        f"⭐ This is a one-time only item!"
+    )
+    save_game_state()
+
+@bot.tree.command(name="use_heal", description="Use a healing item to restore health")
+async def use_heal(interaction: discord.Interaction, item_name: str):
+    uid = interaction.user.id
+    if uid not in characters:
+        await interaction.response.send_message("❌ You don't have a character.")
+        return
+    
+    char = characters[uid]
+    
+    # Check if item is owned
+    item = None
+    is_consumable = False
+    
+    # Check consumables
+    if uid in healing_consumables and item_name in healing_consumables[uid]:
+        for h_item in HEALING_ITEMS["consumable"]:
+            if h_item["name"] == item_name:
+                item = h_item
+                is_consumable = True
+                break
+    
+    # Check one-time items
+    if not item and uid in one_time_purchases and item_name in one_time_purchases[uid]:
+        for h_item in HEALING_ITEMS["one_time"]:
+            if h_item["name"] == item_name:
+                item = h_item
+                is_consumable = False
+                break
+    
+    if not item:
+        await interaction.response.send_message(f"❌ You don't own **{item_name}**!")
+        return
+    
+    # Use the item
+    old_health = char["health"]
+    char["health"] = min(char["health"] + item["heal"], 100)
+    healed = char["health"] - old_health
+    
+    message = f"🧪 Used **{item['name']}**!\n"
+    message += f"❤️ Restored **{healed} HP**!\n"
+    message += f"Health: **{char['health']}/100**"
+    
+    # Remove from inventory
+    if is_consumable:
+        healing_consumables[uid][item_name] -= 1
+        if healing_consumables[uid][item_name] <= 0:
+            del healing_consumables[uid][item_name]
+        message += f"\n📦 Remaining: **{healing_consumables[uid].get(item_name, 0)}**"
+    else:
+        message += f"\n⭐ (One-time item - permanently used)"
+    
+    await interaction.response.send_message(message)
+    save_game_state()
+
+@bot.tree.command(name="inventory", description="Check your healing items inventory")
+async def inventory(interaction: discord.Interaction):
+    uid = interaction.user.id
+    if uid not in characters:
+        await interaction.response.send_message("❌ You don't have a character.")
+        return
+    
+    char = characters[uid]
+    
+    embed = discord.Embed(
+        title=f"📦 {char['prefix']}'s Inventory",
+        color=discord.Color.purple()
+    )
+    
+    # Consumables
+    consumable_text = ""
+    if uid in healing_consumables and healing_consumables[uid]:
+        for item_name, count in healing_consumables[uid].items():
+            consumable_text += f"• {item_name} x**{count}**\n"
+    else:
+        consumable_text = "Empty"
+    
+    embed.add_field(
+        name="📦 Consumables (Stackable)",
+        value=consumable_text,
+        inline=False
+    )
+    
+    # One-time items
+    one_time_text = ""
+    if uid in one_time_purchases and one_time_purchases[uid]:
+        for item_name in one_time_purchases[uid]:
+            one_time_text += f"✅ {item_name}\n"
+    else:
+        one_time_text = "None"
+    
+    embed.add_field(
+        name="💎 Legendary Items",
+        value=one_time_text,
+        inline=False
+    )
+    
+    embed.set_footer(text="Use /use_heal <item_name> to consume an item!")
+    
+    await interaction.response.send_message(embed=embed)
+
 # ----------------------- CLAN COMMAND -----------------------
 @bot.tree.command(name="clan", description="Join a clan")
 async def clan(interaction: discord.Interaction, clan_name: str):
@@ -669,6 +1789,126 @@ async def clan(interaction: discord.Interaction, clan_name: str):
         f"{char['prefix']} has joined **{clan_name}Clan**!\n"
         f"Clan skill: **{char['specialty']} ({char['skill_value']})** 🐾"
     )
+    save_game_state()
+
+@bot.tree.command(name="clan_status", description="Check your clan's status and recent events")
+async def clan_status(interaction: discord.Interaction):
+    uid = interaction.user.id
+    if uid not in characters:
+        await interaction.response.send_message("❌ You don't have a character yet. Use /kit.")
+        return
+    
+    char = characters[uid]
+    clan_name = char.get("clan")
+    
+    if not clan_name:
+        await interaction.response.send_message("⚠️ You haven't joined a clan yet! Use /clan.")
+        return
+    
+    # Get clan stats
+    quality = camp_quality.get(clan_name, 50)
+    prey_piles = clan_prey_piles.get(clan_name, 0)
+    members = get_clan_members(clan_name)
+    
+    # Create emoji indicator for quality
+    if quality >= 80:
+        quality_emoji = "🟩"
+    elif quality >= 50:
+        quality_emoji = "🟨"
+    elif quality >= 20:
+        quality_emoji = "🟧"
+    else:
+        quality_emoji = "🟥"
+    
+    # Create embed
+    embed = discord.Embed(
+        title=f"🐾 {clan_name}Clan Status",
+        description=f"Camp Condition: {quality_emoji} **{quality}/100**",
+        color=discord.Color.blue()
+    )
+    
+    # Clan Status
+    embed.add_field(
+        name="📊 Clan Status",
+        value=(
+            f"Members: **{len(members)}**\n"
+            f"Prey Piles: **{prey_piles} points**\n"
+            f"Camp Quality: **{quality}/100**"
+        ),
+        inline=False
+    )
+    
+    # Recent Events (last 5)
+    if clan_name in clan_events and clan_events[clan_name]:
+        recent_events = clan_events[clan_name][-5:]
+        events_text = ""
+        for evt in reversed(recent_events):
+            severity_emoji = {"MINOR": "🟡", "MODERATE": "🟠", "MAJOR": "🔴"}
+            emoji = severity_emoji.get(evt["severity"], "⚪")
+            events_text += f"{emoji} {evt['event']}\n"
+        
+        embed.add_field(
+            name="📜 Recent Events",
+            value=events_text or "No events yet!",
+            inline=False
+        )
+    else:
+        embed.add_field(
+            name="📜 Recent Events",
+            value="No events yet! Your clan is peaceful for now...",
+            inline=False
+        )
+    
+    # Clan Members Health Summary
+    healthy = sum(1 for uid, m in members if m.get("health", 100) >= 80)
+    injured = sum(1 for uid, m in members if 40 <= m.get("health", 100) < 80)
+    critical = sum(1 for uid, m in members if m.get("health", 100) < 40)
+    
+    embed.add_field(
+        name="❤️ Member Health Overview",
+        value=(
+            f"🟩 Healthy: **{healthy}**\n"
+            f"🟧 Injured: **{injured}**\n"
+            f"🟥 Critical: **{critical}**"
+        ),
+        inline=False
+    )
+    
+    await interaction.response.send_message(embed=embed)
+
+@bot.tree.command(name="trigger_event", description="Manually trigger a random event (testing)")
+async def trigger_event(interaction: discord.Interaction):
+    uid = interaction.user.id
+    if uid not in characters:
+        await interaction.response.send_message("❌ You don't have a character yet. Use /kit.")
+        return
+    
+    char = characters[uid]
+    clan_name = char.get("clan")
+    
+    if not clan_name:
+        await interaction.response.send_message("⚠️ You haven't joined a clan yet! Use /clan.")
+        return
+    
+    # Trigger a random event
+    event, severity, effects = trigger_random_event(clan_name)
+    
+    # Build response message
+    severity_emoji = {"MINOR": "🟡", "MODERATE": "🟠", "MAJOR": "🔴"}
+    emoji = severity_emoji.get(severity, "⚪")
+    
+    message = f"{emoji} **{event['name']}**\n{event['description']}\n\n"
+    
+    # Show effects
+    if "camp_quality" in effects:
+        new_quality = camp_quality[clan_name]
+        message += f"🏕️ Camp Quality: {new_quality}/100\n"
+    if "clan_prey_piles" in effects:
+        message += f"🍖 Prey Piles: {clan_prey_piles[clan_name]} points\n"
+    
+    save_game_state()
+    
+    await interaction.response.send_message(message)
 
 # ----------------------- HUNT / EAT / DONATE -----------------------
 from discord.ui import View, Button
@@ -760,6 +2000,7 @@ async def hunt(interaction: discord.Interaction):
         await interaction.response.send_message(
             f"❌ Hunt failed. No prey this time.\nHunger: {char['hunger']}/100"
         )
+    save_game_state()
 # ----------------------- MEDICINE CAT -----------------------
 @bot.tree.command(name="see_medicine_cat", description="Heal yourself via medicine cat")
 async def see_medicine_cat(interaction: discord.Interaction):
@@ -784,6 +2025,7 @@ async def see_medicine_cat(interaction: discord.Interaction):
     clan = char["clan"]
     camp_quality[clan] = max(0, camp_quality[clan] - 2)
     await interaction.response.send_message(f"🌿 The medicine cat treats your wounds.\nRecovered **{healed} HP**.\nHealth: **{char['health']}/100**")
+    save_game_state()
 
 # ----------------------- TRAIN COMMAND -----------------------
 @bot.tree.command(name="train", description="Train your character to improve stats.")
@@ -805,6 +2047,7 @@ async def train(interaction: discord.Interaction):
     await interaction.response.send_message(
         f"💪 {char['prefix']} trains and gains +1 strength!\nHunger: {char['hunger']}"
     )
+    save_game_state()
 # ----------------------- BATTLE SYSTEM -----------------------
 from discord.ui import View, Button
 
@@ -891,10 +2134,84 @@ async def prompt_turn(interaction, attacker_id, defender_id):
         btn.callback = callback
         view.add_item(btn)
 
+    # Add shop button
+    async def shop_callback(i):
+        if i.user.id != turn_id:
+            await i.response.send_message("❌ It's not your turn.", ephemeral=True)
+            return
+        await show_move_shop(i, attacker_id, defender_id)
+
+    shop_btn = Button(label="💰 Move Shop", style=discord.ButtonStyle.success)
+    shop_btn.callback = shop_callback
+    view.add_item(shop_btn)
+
     await interaction.followup.send(
-        f"🎯 **{char['prefix']}**'s turn!",
+        f"🎯 **{char['prefix']}**'s turn! (Activity Points: **{activity_points.get(turn_id, 0)}**)",
         view=view
     )
+
+async def show_move_shop(interaction, attacker_id, defender_id):
+    """Show buyable moves during battle"""
+    battle = battle_state.get((attacker_id, defender_id))
+    if not battle:
+        return
+
+    turn_id = battle["turn"]
+    char = characters[turn_id]
+    clan = char.get("clan", "Unknown")
+    points = activity_points.get(turn_id, 0)
+    
+    # Get clan-specific moves
+    clan_moves = BUYABLE_MOVES.get(clan, [])
+
+    view = View(timeout=60)
+
+    for move in clan_moves:
+        cost = move["cost"]
+        affordable = "✅" if points >= cost else "❌"
+        
+        async def buy_callback(i, move=move):
+            if i.user.id != turn_id:
+                await i.response.send_message("❌ It's not your turn.", ephemeral=True)
+                return
+            
+            cost = move["cost"]
+            if activity_points.get(turn_id, 0) < cost:
+                await i.response.send_message(f"❌ Not enough points! Need {cost}, have {activity_points.get(turn_id, 0)}")
+                return
+            
+            # Deduct points
+            activity_points[turn_id] -= cost
+            
+            # Execute the bought move
+            await execute_move(i, attacker_id, defender_id, move)
+
+        style = discord.ButtonStyle.green if points >= cost else discord.ButtonStyle.gray
+        btn = Button(label=f"{move['name']} ({cost}pts)", style=style)
+        btn.callback = buy_callback
+        view.add_item(btn)
+
+    # Back button
+    async def back_callback(i):
+        if i.user.id != turn_id:
+            await i.response.send_message("❌ It's not your turn.", ephemeral=True)
+            return
+        await prompt_turn(i, attacker_id, defender_id)
+
+    back_btn = Button(label="← Back", style=discord.ButtonStyle.gray)
+    back_btn.callback = back_callback
+    view.add_item(back_btn)
+
+    move_list = "\n".join([f"• {m['name']} - **{m['cost']} points**" for m in clan_moves])
+    
+    await interaction.response.send_message(
+        f"🛍️ **{clan}Clan Battle Move Shop**\n\n"
+        f"💰 Your Points: **{points}**\n\n"
+        f"Premium clan-exclusive moves:\n{move_list}",
+        view=view,
+        ephemeral=False
+    )
+
 
 async def execute_move(interaction, attacker_id, defender_id, move):
     battle = battle_state[(attacker_id, defender_id)]
@@ -909,12 +2226,17 @@ async def execute_move(interaction, attacker_id, defender_id, move):
     if move["type"] == "charge":
         charge = battle["charge"].get(turn_id)
         if charge:
-            damage = move["damage"]
+            # Calculate damage from stats if available, otherwise use fallback
+            if "stat_multiplier" in move:
+                damage = calculate_stat_damage(attacker, move["stat_multiplier"])
+            else:
+                damage = move.get("damage", 20)
+            
             # Apply pregnancy penalty
             damage = int(damage * apply_pregnancy_effects(attacker))
             defender["health"] = max(defender["health"] - damage, 0)
             battle["charge"].pop(turn_id)
-            result = f"💥 {attacker['prefix']} unleashes **{move['name']}** for {damage} damage!"
+            result = f"💥 {attacker['prefix']} unleashes **{move['name']}** for **{damage} damage**!"
         else:
             battle["charge"][turn_id] = move
             result = f"⚡ {attacker['prefix']} begins charging **{move['name']}**!"
@@ -922,13 +2244,27 @@ async def execute_move(interaction, attacker_id, defender_id, move):
     # ---- Status Moves ----
     elif move["type"] == "status":
         buffs = move.get("buff", {})
+        buff_text = ""
         if "heal" in buffs:
             attacker["health"] = min(attacker["health"] + buffs["heal"], 100)
-        result = f"✨ {attacker['prefix']} uses **{move['name']}**!"
+            buff_text += f" +{buffs['heal']} HP"
+        if "defense_up" in buffs:
+            buff_text += f" +{buffs['defense_up']} Defense"
+        if "attack_up" in buffs:
+            buff_text += f" +{buffs['attack_up']} Attack"
+        if "speed" in buffs:
+            buff_text += f" +{buffs['speed']} Speed"
+        result = f"✨ {attacker['prefix']} uses **{move['name']}**!{buff_text}"
 
     # ---- Physical Moves ----
     else:
-        damage = move["damage"] + hunger_modifier(attacker["hunger"])
+        # Calculate damage from stats if available, otherwise use fallback
+        if "stat_multiplier" in move:
+            damage = calculate_stat_damage(attacker, move["stat_multiplier"])
+        else:
+            damage = move.get("damage", 15)
+        
+        # Apply pregnancy penalty
         damage = int(damage * apply_pregnancy_effects(attacker))
         damage = max(1, damage)
         defender["health"] = max(defender["health"] - damage, 0)
@@ -941,6 +2277,7 @@ async def execute_move(interaction, attacker_id, defender_id, move):
         f"❤️ {attacker['prefix']} HP: {attacker['health']}\n"
         f"❤️ {defender['prefix']} HP: {defender['health']}"
     )
+    save_game_state()  # Save after each move
 
     # ---- Check Victory ----
     if attacker["health"] <= 0 or defender["health"] <= 0:
@@ -950,6 +2287,7 @@ async def execute_move(interaction, attacker_id, defender_id, move):
         await interaction.followup.send(
             f"🏆 **{winner['prefix']}** wins! **{loser['prefix']}** is defeated."
         )
+        save_game_state()
         return
 
     await prompt_turn(interaction, attacker_id, defender_id)
@@ -978,6 +2316,7 @@ async def maintain_camp(interaction: discord.Interaction):
         f"Camp quality improved by **{improvement}** points!\n"
         f"New quality: **{quality}**\n{condition}"
     )
+    save_game_state()
 
 @bot.tree.command(name="camp_decay", description="Lower camp quality (admin)")
 @app_commands.checks.has_permissions(administrator=True)
@@ -985,6 +2324,7 @@ async def camp_decay(interaction: discord.Interaction):
     for clan in camp_quality:
         camp_quality[clan] = max(0, camp_quality[clan]-5)
     await interaction.response.send_message("🌧️ Weather and time have worn down the camps. Camp quality decreased.")
+    save_game_state()
 
 # ----------------------- SEASON COMMANDS -----------------------
 @bot.tree.command(name="season", description="Check the current season")
@@ -1001,6 +2341,13 @@ async def set_season(interaction: discord.Interaction, new_season: str):
         return
     season = new_season
     await interaction.response.send_message(f"🌿 The season has been changed! It is now **{season.capitalize()}**.")
+    save_game_state()
+
+# ----------------------- MANUAL SAVE -----------------------
+@bot.tree.command(name="save_game", description="Manually save game state")
+async def save_game(interaction: discord.Interaction):
+    save_game_state()
+    await interaction.response.send_message("💾 Game saved successfully! 🌿")
 
 # ----------------------- PING -----------------------
 @bot.tree.command(name="ping", description="Check if the bot is active")
