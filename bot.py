@@ -2008,8 +2008,8 @@ async def hunt(interaction: discord.Interaction):
         )
     save_game_state()
 # ----------------------- MEDICINE CAT -----------------------
-@bot.tree.command(name="see_medicine_cat", description="Heal yourself via medicine cat")
-async def see_medicine_cat(interaction: discord.Interaction):
+@bot.tree.command(name="medicine_cat", description="Heal yourself via medicine cat")
+async def medicine_cat(interaction: discord.Interaction):
     uid = interaction.user.id
     if in_battle(uid):
         await interaction.response.send_message("⚔️ You cannot visit the medicine cat during battle.")
@@ -2348,7 +2348,103 @@ async def set_season(interaction: discord.Interaction, new_season: str):
     season = new_season
     await interaction.response.send_message(f"🌿 The season has been changed! It is now **{season.capitalize()}**.")
     save_game_state()
-
+# ----------------------- ASSIGN MENTOR -----------------------
+@bot.tree.command(name="assign_mentor", description="Assign a kit to a mentor and promote to apprentice")
+async def assign_mentor(interaction: discord.Interaction, kit: discord.Member, mentor: discord.Member):
+    """
+    Assign a kit (6+ moons) to a mentor and promote them to apprentice.
+    Only clan leader or admin can use this.
+    """
+    uid = interaction.user.id
+    kit_id = kit.id
+    mentor_id = mentor.id
+    
+    # Check if caller is admin or clan leader
+    caller = characters.get(uid)
+    if not caller:
+        await interaction.response.send_message("❌ You need a character to use this command.")
+        return
+    
+    if not (interaction.user.guild_permissions.administrator or caller.get("is_leader")):
+        await interaction.response.send_message("❌ Only clan leaders or admins can assign mentors.")
+        return
+    
+    # Validate kit
+    kit_char = characters.get(kit_id)
+    if not kit_char:
+        await interaction.response.send_message("❌ That kit doesn't have a character.")
+        return
+    
+    # Validate mentor
+    mentor_char = characters.get(mentor_id)
+    if not mentor_char:
+        await interaction.response.send_message("❌ That mentor doesn't have a character.")
+        return
+    
+    # Check kit age (must be 6+ moons)
+    kit_moons = kit_char.get("moons", 0)
+    if kit_moons < 6:
+        await interaction.response.send_message(
+            f"❌ **{kit_char['prefix']}** is only **{kit_moons} moons old**. Kits must be at least **6 moons** old to become an apprentice."
+        )
+        return
+    
+    # Check kit rank (must be a kit)
+    if kit_char.get("rank") == "apprentice":
+        await interaction.response.send_message(
+            f"⚠️ **{kit_char['prefix']}** is already an apprentice!"
+        )
+        return
+    
+    if kit_char.get("rank") != "kit":
+        await interaction.response.send_message(
+            f"❌ **{kit_char['prefix']}** is a **{kit_char.get('rank')}**, not a kit."
+        )
+        return
+    
+    # Check mentor rank (must be warrior or higher)
+    mentor_rank = mentor_char.get("rank", "unknown")
+    if mentor_rank not in ["warrior", "leader", "medicine cat"]:
+        await interaction.response.send_message(
+            f"❌ **{mentor_char['prefix']}** is a **{mentor_rank}**, not a warrior or higher rank."
+        )
+        return
+    
+    # Check if both are in same clan
+    kit_clan = kit_char.get("clan")
+    mentor_clan = mentor_char.get("clan")
+    
+    if not kit_clan or not mentor_clan:
+        await interaction.response.send_message(
+            "❌ Both the kit and mentor must be members of a clan."
+        )
+        return
+    
+    if kit_clan != mentor_clan:
+        await interaction.response.send_message(
+            f"❌ **{kit_char['prefix']}** is in **{kit_clan}Clan** but **{mentor_char['prefix']}** is in **{mentor_clan}Clan**. They must be in the same clan!"
+        )
+        return
+    
+    # All checks passed - promote kit to apprentice
+    kit_char["rank"] = "apprentice"
+    kit_char["mentor"] = mentor_char["prefix"]
+    kit_char["specialty"] = mentor_clan  # Set to their clan's specialty for now
+    
+    # Send ceremony message
+    ceremony = (
+        f"🌟 **Apprenticeship Ceremony** 🌟\n\n"
+        f"**{kit_char['prefix']}kit**, you have reached the age of **{kit_moons} moons**.\n\n"
+        f"You are now ready to begin your training as an apprentice.\n\n"
+        f"Your mentor will be: **{mentor_char['prefix']}**\n\n"
+        f"May you learn well and grow strong.\n\n"
+        f"🎉 **{kit_char['prefix']} is now an apprentice!** 🎉\n"
+        f"Mentor: **{mentor_char['prefix']}**\n"
+        f"Clan: **{kit_clan}Clan**"
+    )
+    
+    await interaction.response.send_message(ceremony)
+    save_game_state()
 # ----------------------- MANUAL SAVE -----------------------
 @bot.tree.command(name="save_game", description="Manually save game state")
 async def save_game(interaction: discord.Interaction):
